@@ -239,22 +239,13 @@
 <div class="wrap" id="app"></div>
 
 <script type="module">
-import { initializeApp } from 'https://www.gstatic.com/firebasejs/12.16.0/firebase-app.js';
-import {
-  getFirestore,
-  doc,
-  getDoc,
-  onSnapshot,
-  setDoc,
-  serverTimestamp
-} from 'https://www.gstatic.com/firebasejs/12.16.0/firebase-firestore.js';
 
 // Firebase config: paste your web app config values here.
 // Firebase Console > Project settings > General > Your apps > Web app config.
 const firebaseConfig = {
   apiKey: 'AIzaSyDQReO2ZfJ8MVqIdM2nHC2R622OZ3YHVjE',
   authDomain: 'cricket-score-a1422.firebaseapp.com',
-  projectId: 'cricket-score-a1422"',
+  projectId: 'cricket-score-a1422',
   storageBucket: 'cricket-score-a1422.firebasestorage.app',
   messagingSenderId: '1029693418477',
   appId: '1:1029693418477:web:800ea3e8ccfaf4d73f15e4'
@@ -265,6 +256,7 @@ const FIRESTORE_DOCUMENT_ID = 'main-scoreboard';
 let currentUser = null;
 let state = null;
 let db = null;
+let firebaseApi = null;
 let unsubscribeScore = null;
 let storageWorks = false; // only true once we've confirmed Firestore reads/writes actually succeed
 
@@ -288,24 +280,51 @@ function isFirebaseConfigured(){
   );
 }
 
-function getDb(){
-  if(db) return db;
+async function loadFirebaseApi(){
+  if(firebaseApi) return firebaseApi;
   if(!isFirebaseConfigured()){
     console.warn('Firebase config is empty. Add your Firebase web app keys in index.html.');
     return null;
   }
-  const app = initializeApp(firebaseConfig);
-  db = getFirestore(app);
+
+  try{
+    const [appModule, firestoreModule] = await Promise.all([
+      import('https://www.gstatic.com/firebasejs/12.16.0/firebase-app.js'),
+      import('https://www.gstatic.com/firebasejs/12.16.0/firebase-firestore.js')
+    ]);
+    firebaseApi = {
+      initializeApp: appModule.initializeApp,
+      getFirestore: firestoreModule.getFirestore,
+      doc: firestoreModule.doc,
+      getDoc: firestoreModule.getDoc,
+      onSnapshot: firestoreModule.onSnapshot,
+      setDoc: firestoreModule.setDoc,
+      serverTimestamp: firestoreModule.serverTimestamp
+    };
+    return firebaseApi;
+  }catch(e){
+    console.error('Firebase SDK load failed', e);
+    return null;
+  }
+}
+
+async function getDb(){
+  if(db) return db;
+  const api = await loadFirebaseApi();
+  if(!api) return null;
+  const app = api.initializeApp(firebaseConfig);
+  db = api.getFirestore(app);
   return db;
 }
 
 // Loads state from Firestore. Returns null (instead of a default) on
 // any failure, so callers never accidentally wipe local unsaved data.
 async function loadState(){
-  const firestore = getDb();
+  const firestore = await getDb();
   if(!firestore) return null;
+  const api = await loadFirebaseApi();
   try{
-    const snap = await getDoc(doc(firestore, FIRESTORE_COLLECTION, FIRESTORE_DOCUMENT_ID));
+    const snap = await api.getDoc(api.doc(firestore, FIRESTORE_COLLECTION, FIRESTORE_DOCUMENT_ID));
     if(snap.exists()){
       const data = snap.data();
       storageWorks = true;
@@ -319,14 +338,15 @@ async function loadState(){
 }
 
 async function saveState(){
-  const firestore = getDb();
+  const firestore = await getDb();
   if(!firestore) return;
+  const api = await loadFirebaseApi();
   try{
-    await setDoc(
-      doc(firestore, FIRESTORE_COLLECTION, FIRESTORE_DOCUMENT_ID),
+    await api.setDoc(
+      api.doc(firestore, FIRESTORE_COLLECTION, FIRESTORE_DOCUMENT_ID),
       {
         state,
-        updatedAt: serverTimestamp(),
+        updatedAt: api.serverTimestamp(),
         updatedBy: currentUser || 'unknown'
       },
       { merge: true }
@@ -337,12 +357,13 @@ async function saveState(){
   }
 }
 
-function watchState(){
-  const firestore = getDb();
+async function watchState(){
+  const firestore = await getDb();
   if(!firestore || unsubscribeScore) return;
+  const api = await loadFirebaseApi();
 
-  unsubscribeScore = onSnapshot(
-    doc(firestore, FIRESTORE_COLLECTION, FIRESTORE_DOCUMENT_ID),
+  unsubscribeScore = api.onSnapshot(
+    api.doc(firestore, FIRESTORE_COLLECTION, FIRESTORE_DOCUMENT_ID),
     snap=>{
       if(!currentUser || !snap.exists()) return;
       const data = snap.data();
@@ -542,9 +563,14 @@ async function doLogin(){
   const val = document.getElementById('loginName').value.trim();
   if(!val) return;
   currentUser = val;
-  const loaded = await loadState();
-  state = loaded || defaultState(); // only default when storage is truly empty/unavailable, and only once
+  state = defaultState();
   render();
+
+  const loaded = await loadState();
+  if(loaded){
+    state = loaded;
+    render();
+  }
   watchState();
 }
 
