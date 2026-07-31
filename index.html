@@ -110,11 +110,15 @@
     display:grid;
     grid-template-columns: 1fr auto 1fr;
     align-items:center;
+    position: sticky;
+    top: 0;
+    z-index: 10;
     background: var(--panel);
     border: 1px solid var(--line);
     border-radius: 4px;
     padding: 18px 20px;
     margin-bottom: 24px;
+    box-shadow: 0 12px 28px rgba(0,0,0,0.24);
   }
   .summary .side{text-align:center;}
   .summary .side h2{
@@ -127,6 +131,12 @@
     text-shadow: 0 0 12px rgba(240,180,41,0.35);
   }
   .summary .side .overs{font-size:12px; color:var(--text-dim); font-family:'Share Tech Mono', monospace;}
+  .summary .side .balls-total{
+    font-size:12px;
+    color: var(--text);
+    font-family:'Share Tech Mono', monospace;
+    margin-top: 3px;
+  }
   .summary .vs{
     font-size: 13px; color: var(--text-dim); letter-spacing: 2px; padding: 0 14px;
   }
@@ -137,6 +147,7 @@
     grid-template-columns: 1fr 1fr;
     gap: 18px;
   }
+  .teams.single{grid-template-columns: minmax(0, 1fr);}
   @media (max-width: 720px){ .teams{grid-template-columns: 1fr;} }
 
   .team{
@@ -229,6 +240,24 @@
 
   .empty{color: var(--text-dim); font-size: 13px; padding: 14px; text-align:center;}
 
+  .innings-actions{
+    padding: 14px;
+    border-top: 1px solid var(--line);
+    background: rgba(0,0,0,0.12);
+  }
+
+  .chase-info{
+    grid-column: 1 / -1;
+    text-align:center;
+    color: var(--amber);
+    font-family:'Share Tech Mono', monospace;
+    font-size: 14px;
+    margin-top: 12px;
+  }
+
+  .chase-info.done{color: var(--green-glow);}
+  .chase-info.short{color: var(--red);}
+
   .footer-note{
     text-align:center; color: var(--text-dim); font-size:12px; margin-top: 26px;
     font-family:'Share Tech Mono', monospace;
@@ -263,7 +292,21 @@ let storageWorks = false; // only true once we've confirmed Firestore reads/writ
 function defaultState(){
   return {
     teamA: { name: 'Team A', players: [] },
-    teamB: { name: 'Team B', players: [] }
+    teamB: { name: 'Team B', players: [] },
+    firstInningsComplete: false,
+    firstInningsBalls: null,
+    targetRuns: null
+  };
+}
+
+function normalizeState(raw){
+  const base = defaultState();
+  const next = raw && typeof raw === 'object' ? raw : {};
+  return {
+    ...base,
+    ...next,
+    teamA: { ...base.teamA, ...(next.teamA || {}) },
+    teamB: { ...base.teamB, ...(next.teamB || {}) }
   };
 }
 
@@ -328,7 +371,7 @@ async function loadState(){
     if(snap.exists()){
       const data = snap.data();
       storageWorks = true;
-      return data.state || defaultState();
+      return normalizeState(data.state);
     }
     storageWorks = true;
     return defaultState();
@@ -367,7 +410,7 @@ async function watchState(){
     snap=>{
       if(!currentUser || !snap.exists()) return;
       const data = snap.data();
-      state = data.state || defaultState();
+      state = normalizeState(data.state);
       render();
     },
     e=>console.error('Live Firestore update failed', e)
@@ -388,6 +431,26 @@ function teamTotals(team){
     if(p.out) outs++;
   });
   return {runs, balls, outs};
+}
+
+function chaseStatus(totB){
+  if(!state.firstInningsComplete) return null;
+  const target = state.targetRuns || 0;
+  const totalBalls = state.firstInningsBalls || 0;
+  const runsNeeded = Math.max(target - totB.runs, 0);
+  const ballsLeft = Math.max(totalBalls - totB.balls, 0);
+  const won = runsNeeded === 0;
+  const short = !won && ballsLeft === 0;
+  return { target, totalBalls, runsNeeded, ballsLeft, won, short };
+}
+
+async function completeFirstInnings(){
+  const totA = teamTotals(state.teamA);
+  state.firstInningsComplete = true;
+  state.firstInningsBalls = totA.balls;
+  state.targetRuns = totA.runs + 1;
+  await saveState();
+  render();
 }
 
 function render(){
@@ -414,6 +477,17 @@ function render(){
 
   const totA = teamTotals(state.teamA);
   const totB = teamTotals(state.teamB);
+  const chase = chaseStatus(totB);
+  const chaseHtml = chase
+    ? `<div class="chase-info${chase.won ? ' done' : chase.short ? ' short' : ''}">
+        ${chase.won
+          ? `${escapeHtml(state.teamB.name)} won the chase`
+          : chase.short
+            ? `${escapeHtml(state.teamB.name)} short by ${chase.runsNeeded} runs`
+            : `${escapeHtml(state.teamB.name)} needs ${chase.runsNeeded} runs in ${chase.ballsLeft} balls`}
+      </div>`
+    : '';
+  const activeTeamKey = state.firstInningsComplete ? 'teamB' : 'teamA';
 
   app.innerHTML = `
     <div class="masthead">
@@ -431,18 +505,20 @@ function render(){
         <h2>${escapeHtml(state.teamA.name)}</h2>
         <div class="score">${totA.runs}/${totA.outs}</div>
         <div class="overs">${oversDisplay(totA.balls)} overs</div>
+        <div class="balls-total">${totA.balls} balls</div>
       </div>
       <div class="vs">VS</div>
       <div class="side">
         <h2>${escapeHtml(state.teamB.name)}</h2>
         <div class="score">${totB.runs}/${totB.outs}</div>
         <div class="overs">${oversDisplay(totB.balls)} overs</div>
+        <div class="balls-total">${totB.balls} balls</div>
       </div>
+      ${chaseHtml}
     </div>
 
-    <div class="teams">
-      ${teamPanel('teamA')}
-      ${teamPanel('teamB')}
+    <div class="teams single">
+      ${teamPanel(activeTeamKey)}
     </div>
 
     <div class="footer-note">Data yahan sabko dikhta hai &mdash; jo bhi score update karega, sab dekh payenge</div>
@@ -457,7 +533,7 @@ function render(){
     render();
   };
 
-  ['teamA','teamB'].forEach(key=>{
+  [activeTeamKey].forEach(key=>{
     const nameInput = document.getElementById('name-'+key);
     nameInput.addEventListener('change', async ()=>{
       state[key].name = nameInput.value.trim() || (key==='teamA' ? 'Team A':'Team B');
@@ -514,10 +590,20 @@ function render(){
       }
     });
   });
+
+  const completeBtn = document.getElementById('completeFirstInningsBtn');
+  if(completeBtn){
+    completeBtn.onclick = completeFirstInnings;
+  }
 }
 
 function teamPanel(key){
   const team = state[key];
+  const inningsActionHtml = key === 'teamA' && !state.firstInningsComplete
+    ? `<div class="innings-actions">
+        <button type="button" class="btn btn-block" id="completeFirstInningsBtn">1st Inning Completed</button>
+      </div>`
+    : '';
   const playersHtml = team.players.length
     ? team.players.map(p=>`
       <div class="player">
@@ -549,6 +635,7 @@ function teamPanel(key){
         <button type="button" class="btn btn-small" id="addbtn-${key}">Add</button>
       </div>
       <div class="players">${playersHtml}</div>
+      ${inningsActionHtml}
     </div>
   `;
 }
