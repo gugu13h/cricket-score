@@ -74,6 +74,67 @@
     margin-bottom: 14px;
   }
   .login-card input:focus{outline:none; border-color: var(--amber);}
+  .public-login{
+    max-width: 380px;
+    margin: 26px auto 0;
+  }
+  .score-grid{
+    display:grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 18px;
+    margin-top: 18px;
+  }
+  @media (max-width: 720px){ .score-grid{grid-template-columns: 1fr;} }
+  .score-table{
+    width:100%;
+    border-collapse: collapse;
+    font-family:'Share Tech Mono', monospace;
+    font-size: 13px;
+  }
+  .score-table th,
+  .score-table td{
+    padding: 8px 6px;
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+    text-align:left;
+  }
+  .score-table th{
+    color: var(--text-dim);
+    font-weight: 400;
+  }
+  .score-table button{
+    background:none;
+    border:none;
+    color:var(--amber);
+    font:inherit;
+    padding:0;
+    cursor:pointer;
+  }
+  .score-table td:last-child,
+  .score-table th:last-child{text-align:right;}
+  .search-panel{
+    margin-top: 18px;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: 14px;
+  }
+  .search-panel input{
+    width:100%;
+    background: var(--panel-2);
+    border: 1px solid var(--line);
+    color: var(--text);
+    border-radius: 3px;
+    padding: 10px 12px;
+    font-family:'Oswald', sans-serif;
+    font-size: 15px;
+  }
+  .detail-box{
+    margin-top: 10px;
+    color: var(--text-dim);
+    font-family:'Share Tech Mono', monospace;
+    font-size: 13px;
+    line-height: 1.8;
+  }
   .btn{
     background: var(--amber);
     color: #241a03;
@@ -175,6 +236,15 @@
     text-overflow:ellipsis;
     white-space:nowrap;
   }
+  .current-bowler{
+    grid-column: 1 / -1;
+    text-align:center;
+    color: var(--text-dim);
+    font-family:'Share Tech Mono', monospace;
+    font-size: 13px;
+    margin-top: 10px;
+  }
+  .current-bowler strong{color: var(--amber);}
 
   .ball-log{
     grid-column: 1 / -1;
@@ -287,6 +357,7 @@
   .runbtn.six{color: var(--green-glow); border-color: rgba(62,207,106,0.3);}
   .runbtn.six:hover{border-color: var(--green-glow);}
   .runbtn.extra{width:auto; padding: 0 10px; color: var(--amber); border-color: rgba(240,180,41,0.35);}
+  .runbtn.active{background: var(--amber); color:#241a03; border-color: var(--amber);}
   .iconbtn{
     background: transparent;
     border: 1px solid var(--line);
@@ -353,12 +424,36 @@ let storageWorks = false; // only true once we've confirmed Firestore reads/writ
 
 function defaultState(){
   return {
-    teamA: { name: 'Team A', players: [], extras: 0, ballLog: [] },
-    teamB: { name: 'Team B', players: [], extras: 0, ballLog: [] },
+    teamA: { name: 'Team A', players: [], bowlers: [], activeBowlerId: null, extras: 0, ballLog: [] },
+    teamB: { name: 'Team B', players: [], bowlers: [], activeBowlerId: null, extras: 0, ballLog: [] },
     firstInningsComplete: false,
     firstInningsBalls: null,
     targetRuns: null
   };
+}
+
+function defaultPlayer(name){
+  return { id: uid(), name, runs: 0, balls: 0, out: false, runCounts: { 0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 6: 0 } };
+}
+
+function normalizePlayer(player){
+  return {
+    ...defaultPlayer(player && player.name ? player.name : ''),
+    ...(player || {}),
+    runCounts: {
+      0: 0,
+      1: 0,
+      2: 0,
+      3: 0,
+      4: 0,
+      6: 0,
+      ...((player && player.runCounts) || {})
+    }
+  };
+}
+
+function normalizeBowler(bowler){
+  return { id: uid(), name: '', runs: 0, balls: 0, wickets: 0, ...(bowler || {}) };
 }
 
 function normalizeState(raw){
@@ -367,8 +462,20 @@ function normalizeState(raw){
   return {
     ...base,
     ...next,
-    teamA: { ...base.teamA, ...(next.teamA || {}), ballLog: (next.teamA && next.teamA.ballLog) || [] },
-    teamB: { ...base.teamB, ...(next.teamB || {}), ballLog: (next.teamB && next.teamB.ballLog) || [] }
+    teamA: {
+      ...base.teamA,
+      ...(next.teamA || {}),
+      ballLog: (next.teamA && next.teamA.ballLog) || [],
+      players: ((next.teamA && next.teamA.players) || []).map(normalizePlayer),
+      bowlers: ((next.teamA && next.teamA.bowlers) || []).map(normalizeBowler)
+    },
+    teamB: {
+      ...base.teamB,
+      ...(next.teamB || {}),
+      ballLog: (next.teamB && next.teamB.ballLog) || [],
+      players: ((next.teamB && next.teamB.players) || []).map(normalizePlayer),
+      bowlers: ((next.teamB && next.teamB.bowlers) || []).map(normalizeBowler)
+    }
   };
 }
 
@@ -470,7 +577,7 @@ async function watchState(){
   unsubscribeScore = api.onSnapshot(
     api.doc(firestore, FIRESTORE_COLLECTION, FIRESTORE_DOCUMENT_ID),
     snap=>{
-      if(!currentUser || !snap.exists()) return;
+      if(!snap.exists()) return;
       const data = snap.data();
       state = normalizeState(data.state);
       render();
@@ -499,6 +606,42 @@ function currentBatters(team){
   return team.players.filter(p=>!p.out).slice(0, 2);
 }
 
+function opponentKey(teamKey){
+  return teamKey === 'teamA' ? 'teamB' : 'teamA';
+}
+
+function activeBowler(teamKey){
+  const team = state[teamKey];
+  return (team.bowlers || []).find(b=>b.id === team.activeBowlerId) || null;
+}
+
+function economy(bowler){
+  const balls = bowler.balls || 0;
+  if(!balls) return '0.00';
+  return (((bowler.runs || 0) / balls) * 6).toFixed(2);
+}
+
+function strikeRate(player){
+  return player.balls ? ((player.runs / player.balls) * 100).toFixed(2) : '0.00';
+}
+
+function playerDetailText(player){
+  const counts = player.runCounts || {};
+  return `${escapeHtml(player.name)}: ${player.runs}(${player.balls}), SR ${strikeRate(player)}, 1s ${counts[1] || 0}, 2s ${counts[2] || 0}, 3s ${counts[3] || 0}, 4s ${counts[4] || 0}, 6s ${counts[6] || 0}`;
+}
+
+function bowlerDetailText(bowler){
+  return `${escapeHtml(bowler.name)}: Runs ${bowler.runs || 0}, Wickets ${bowler.wickets || 0}, Overs ${oversDisplay(bowler.balls || 0)}, Economy ${economy(bowler)}`;
+}
+
+function creditBowler(bowlingTeamKey, runs, legalBall, wicket){
+  const bowler = activeBowler(bowlingTeamKey);
+  if(!bowler) return;
+  bowler.runs = (bowler.runs || 0) + runs;
+  bowler.balls = (bowler.balls || 0) + (legalBall ? 1 : 0);
+  bowler.wickets = (bowler.wickets || 0) + (wicket ? 1 : 0);
+}
+
 function addBallEvent(teamKey, label, type){
   const team = state[teamKey];
   team.ballLog = team.ballLog || [];
@@ -510,9 +653,73 @@ function addBallEvent(teamKey, label, type){
 
 async function addExtra(teamKey, label){
   state[teamKey].extras = (state[teamKey].extras || 0) + 1;
+  creditBowler(opponentKey(teamKey), 1, false, false);
   addBallEvent(teamKey, label, 'extra');
   await saveState();
   render();
+}
+
+function scoreboardSummaryHtml(activeTeamKey){
+  const totA = teamTotals(state.teamA);
+  const totB = teamTotals(state.teamB);
+  const chase = chaseStatus(totB);
+  const activeTeam = state[activeTeamKey];
+  const bowlingTeamKey = opponentKey(activeTeamKey);
+  const bowler = activeBowler(bowlingTeamKey);
+  const batters = currentBatters(activeTeam);
+  while(batters.length < 2){
+    batters.push(null);
+  }
+  const battersHtml = batters.slice(0, 2).map((p, idx)=>`
+    <div class="batter-card">
+      <div class="label">Batsman ${idx + 1}</div>
+      <div class="value">
+        <span>${p ? escapeHtml(p.name) : 'Add player'}</span>
+        <strong>${p ? `${p.runs}(${p.balls})` : '0(0)'}</strong>
+      </div>
+    </div>
+  `).join('');
+  const ballLogHtml = (activeTeam.ballLog || []).length
+    ? activeTeam.ballLog.slice(-12).map(ball=>`
+      <span class="ball-chip ${ball.type || ''}">${escapeHtml(ball.label)}</span>
+    `).join('')
+    : `<span class="ball-chip">-</span>`;
+  const chaseHtml = chase
+    ? `<div class="chase-info${chase.won ? ' done' : chase.short ? ' short' : ''}">
+        ${chase.won
+          ? `${escapeHtml(state.teamB.name)} won the chase`
+          : chase.short
+            ? `${escapeHtml(state.teamB.name)} short by ${chase.runsNeeded} runs`
+            : `${escapeHtml(state.teamB.name)} needs ${chase.runsNeeded} runs in ${chase.ballsLeft} balls`}
+      </div>`
+    : '';
+
+  return `
+    <div class="summary">
+      <div class="side">
+        <h2>${escapeHtml(state.teamA.name)}</h2>
+        <div class="score">${totA.runs}/${totA.outs}</div>
+        <div class="overs">Extras ${totA.extras}</div>
+        <div class="overs">${oversDisplay(totA.balls)} overs</div>
+        <div class="balls-total">${totA.balls} balls</div>
+      </div>
+      <div class="vs">VS</div>
+      <div class="side">
+        <h2>${escapeHtml(state.teamB.name)}</h2>
+        <div class="score">${totB.runs}/${totB.outs}</div>
+        <div class="overs">Extras ${totB.extras}</div>
+        <div class="overs">${oversDisplay(totB.balls)} overs</div>
+        <div class="balls-total">${totB.balls} balls</div>
+      </div>
+      <div class="crease">${battersHtml}</div>
+      <div class="current-bowler">
+        Current bowler: <strong>${bowler ? escapeHtml(bowler.name) : 'Not selected'}</strong>
+        ${bowler ? ` - ${bowler.runs || 0}/${bowler.wickets || 0} (${oversDisplay(bowler.balls || 0)}), Econ ${economy(bowler)}` : ''}
+      </div>
+      <div class="ball-log">${ballLogHtml}</div>
+      ${chaseHtml}
+    </div>
+  `;
 }
 
 function chaseStatus(totB){
@@ -535,60 +742,145 @@ async function completeFirstInnings(){
   render();
 }
 
+function battingRows(team){
+  return team.players.length
+    ? team.players.map(p=>`
+      <tr>
+        <td><button type="button" class="batsman-detail-btn" data-player-id="${p.id}">${escapeHtml(p.name)}</button>${p.out ? ' (out)' : ''}</td>
+        <td>${p.runs}(${p.balls})</td>
+      </tr>
+    `).join('')
+    : `<tr><td colspan="2">No batsman added</td></tr>`;
+}
+
+function bowlingRows(team){
+  return (team.bowlers || []).length
+    ? team.bowlers.map(b=>`
+      <tr>
+        <td><button type="button" class="bowler-detail-btn" data-bowler-id="${b.id}">${escapeHtml(b.name)}</button></td>
+        <td>${b.runs || 0}/${b.wickets || 0} (${oversDisplay(b.balls || 0)})</td>
+      </tr>
+    `).join('')
+    : `<tr><td colspan="2">No bowler added</td></tr>`;
+}
+
+function livePageHtml(activeTeamKey){
+  return `
+    <div class="masthead">
+      <div class="eyebrow">Live match</div>
+      <h1>Cricket Scoreboard</h1>
+    </div>
+
+    ${scoreboardSummaryHtml(activeTeamKey)}
+
+    <div class="score-grid">
+      <div class="team">
+        <div class="team-head"><h2>${escapeHtml(state.teamA.name)} Batting</h2></div>
+        <div class="players">
+          <table class="score-table">
+            <thead><tr><th>Batsman</th><th>R(B)</th></tr></thead>
+            <tbody>${battingRows(state.teamA)}</tbody>
+          </table>
+        </div>
+      </div>
+      <div class="team">
+        <div class="team-head"><h2>${escapeHtml(state.teamB.name)} Batting</h2></div>
+        <div class="players">
+          <table class="score-table">
+            <thead><tr><th>Batsman</th><th>R(B)</th></tr></thead>
+            <tbody>${battingRows(state.teamB)}</tbody>
+          </table>
+        </div>
+      </div>
+      <div class="team">
+        <div class="team-head"><h2>${escapeHtml(state.teamA.name)} Bowling</h2></div>
+        <div class="players">
+          <table class="score-table">
+            <thead><tr><th>Bowler</th><th>R/W (O)</th></tr></thead>
+            <tbody>${bowlingRows(state.teamA)}</tbody>
+          </table>
+        </div>
+      </div>
+      <div class="team">
+        <div class="team-head"><h2>${escapeHtml(state.teamB.name)} Bowling</h2></div>
+        <div class="players">
+          <table class="score-table">
+            <thead><tr><th>Bowler</th><th>R/W (O)</th></tr></thead>
+            <tbody>${bowlingRows(state.teamB)}</tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <div class="search-panel">
+      <input id="batsmanSearch" type="text" placeholder="Batsman search karein" />
+      <div class="detail-box" id="playerDetailBox">Batsman name search ya click karein.</div>
+    </div>
+
+    <div class="login-card public-login">
+      <p>Scorer login</p>
+      <input id="loginName" type="text" placeholder="Aapka naam" maxlength="30" />
+      <button class="btn btn-block" id="loginBtn">Login</button>
+    </div>
+  `;
+}
+
+function allPlayers(){
+  return [...state.teamA.players, ...state.teamB.players];
+}
+
+function allBowlers(){
+  return [...state.teamA.bowlers, ...state.teamB.bowlers];
+}
+
+function bindPublicDetails(){
+  const detailBox = document.getElementById('playerDetailBox');
+  const search = document.getElementById('batsmanSearch');
+  if(!detailBox) return;
+
+  document.querySelectorAll('.batsman-detail-btn').forEach(btn=>{
+    btn.onclick = ()=>{
+      const player = allPlayers().find(p=>p.id === btn.dataset.playerId);
+      detailBox.innerHTML = player ? playerDetailText(player) : 'Batsman nahi mila.';
+    };
+  });
+
+  document.querySelectorAll('.bowler-detail-btn').forEach(btn=>{
+    btn.onclick = ()=>{
+      const bowler = allBowlers().find(b=>b.id === btn.dataset.bowlerId);
+      detailBox.innerHTML = bowler ? bowlerDetailText(bowler) : 'Bowler nahi mila.';
+    };
+  });
+
+  if(search){
+    search.oninput = ()=>{
+      const q = search.value.trim().toLowerCase();
+      if(!q){
+        detailBox.textContent = 'Batsman name search ya click karein.';
+        return;
+      }
+      const matches = allPlayers().filter(p=>p.name.toLowerCase().includes(q));
+      detailBox.innerHTML = matches.length
+        ? matches.map(playerDetailText).join('<br>')
+        : 'Batsman nahi mila.';
+    };
+  }
+}
+
 function render(){
   const app = document.getElementById('app');
+  state = normalizeState(state || defaultState());
+  const activeTeamKey = state.firstInningsComplete ? 'teamB' : 'teamA';
 
   if(!currentUser){
-    app.innerHTML = `
-      <div class="masthead">
-        <div class="eyebrow">Live scoring</div>
-        <h1>Cricket Scoreboard</h1>
-      </div>
-      <div class="login-card">
-        <p>Apna naam daalein aur scoring shuru karein</p>
-        <input id="loginName" type="text" placeholder="Aapka naam" maxlength="30" />
-        <button class="btn btn-block" id="loginBtn">Login</button>
-      </div>
-    `;
+    app.innerHTML = livePageHtml(activeTeamKey);
     document.getElementById('loginBtn').onclick = doLogin;
     document.getElementById('loginName').addEventListener('keydown', e=>{
       if(e.key === 'Enter') doLogin();
     });
+    bindPublicDetails();
     return;
   }
-
-  const totA = teamTotals(state.teamA);
-  const totB = teamTotals(state.teamB);
-  const chase = chaseStatus(totB);
-  const chaseHtml = chase
-    ? `<div class="chase-info${chase.won ? ' done' : chase.short ? ' short' : ''}">
-        ${chase.won
-          ? `${escapeHtml(state.teamB.name)} won the chase`
-          : chase.short
-            ? `${escapeHtml(state.teamB.name)} short by ${chase.runsNeeded} runs`
-            : `${escapeHtml(state.teamB.name)} needs ${chase.runsNeeded} runs in ${chase.ballsLeft} balls`}
-      </div>`
-    : '';
-  const activeTeamKey = state.firstInningsComplete ? 'teamB' : 'teamA';
-  const activeTeam = state[activeTeamKey];
-  const batters = currentBatters(activeTeam);
-  while(batters.length < 2){
-    batters.push(null);
-  }
-  const battersHtml = batters.slice(0, 2).map((p, idx)=>`
-    <div class="batter-card">
-      <div class="label">Batsman ${idx + 1}</div>
-      <div class="value">
-        <span>${p ? escapeHtml(p.name) : 'Add player'}</span>
-        <strong>${p ? `${p.runs}(${p.balls})` : '0(0)'}</strong>
-      </div>
-    </div>
-  `).join('');
-  const ballLogHtml = (activeTeam.ballLog || []).length
-    ? activeTeam.ballLog.slice(-12).map(ball=>`
-      <span class="ball-chip ${ball.type || ''}">${escapeHtml(ball.label)}</span>
-    `).join('')
-    : `<span class="ball-chip">-</span>`;
 
   app.innerHTML = `
     <div class="masthead">
@@ -601,26 +893,9 @@ function render(){
       <button class="btn btn-ghost btn-small" id="logoutBtn">Logout</button>
     </div>
 
-    <div class="summary">
-      <div class="side">
-        <h2>${escapeHtml(state.teamA.name)}</h2>
-        <div class="score">${totA.runs}/${totA.outs}</div>
-        <div class="overs">Extras ${totA.extras}</div>
-        <div class="overs">${oversDisplay(totA.balls)} overs</div>
-        <div class="balls-total">${totA.balls} balls</div>
-      </div>
-      <div class="vs">VS</div>
-      <div class="side">
-        <h2>${escapeHtml(state.teamB.name)}</h2>
-        <div class="score">${totB.runs}/${totB.outs}</div>
-        <div class="overs">Extras ${totB.extras}</div>
-        <div class="overs">${oversDisplay(totB.balls)} overs</div>
-        <div class="balls-total">${totB.balls} balls</div>
-      </div>
-      <div class="crease">${battersHtml}</div>
-      <div class="ball-log">${ballLogHtml}</div>
-      ${chaseHtml}
-    </div>
+    ${scoreboardSummaryHtml(activeTeamKey)}
+
+    ${setupPanel()}
 
     <div class="teams single">
       ${teamPanel(activeTeamKey)}
@@ -651,7 +926,7 @@ function render(){
     const addPlayerNow = async ()=>{
       const name = addInput.value.trim();
       if(!name) return;
-      state[key].players.push({ id: uid(), name, runs:0, balls:0, out:false });
+      state[key].players.push(defaultPlayer(name));
       await saveState();
       render();
     };
@@ -670,6 +945,9 @@ function render(){
           btn.onclick = async ()=>{
             p.runs += n;
             p.balls += 1;
+            p.runCounts = p.runCounts || { 0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 6: 0 };
+            p.runCounts[n] = (p.runCounts[n] || 0) + 1;
+            creditBowler(opponentKey(key), n, true, false);
             addBallEvent(key, String(n), n === 4 || n === 6 ? 'boundary' : '');
             await saveState();
             render();
@@ -684,6 +962,7 @@ function render(){
           if(!p.out){
             p.out = true;
             p.balls += 1;
+            creditBowler(opponentKey(key), 0, true, true);
             addBallEvent(key, 'W', 'wicket');
           }else{
             p.out = false;
@@ -710,21 +989,146 @@ function render(){
     if(noBallBtn){
       noBallBtn.onclick = ()=>addExtra(key, 'Nb');
     }
+
+    const bowlingTeamKey = opponentKey(key);
+    const addBowlerBtn = document.getElementById('addbowlerbtn-'+bowlingTeamKey);
+    const addBowlerInput = document.getElementById('addbowlerinput-'+bowlingTeamKey);
+    const addBowlerNow = async ()=>{
+      const name = addBowlerInput.value.trim();
+      if(!name) return;
+      const bowler = { id: uid(), name, runs: 0, balls: 0, wickets: 0 };
+      state[bowlingTeamKey].bowlers.push(bowler);
+      state[bowlingTeamKey].activeBowlerId = bowler.id;
+      await saveState();
+      render();
+    };
+    if(addBowlerBtn && addBowlerInput){
+      addBowlerBtn.addEventListener('click', addBowlerNow);
+      addBowlerInput.addEventListener('keydown', e=>{
+        if(e.key === 'Enter'){
+          e.preventDefault();
+          addBowlerNow();
+        }
+      });
+    }
+    (state[bowlingTeamKey].bowlers || []).forEach(b=>{
+      const setBtn = document.getElementById('setbowler-'+b.id);
+      if(setBtn){
+        setBtn.onclick = async ()=>{
+          state[bowlingTeamKey].activeBowlerId = b.id;
+          await saveState();
+          render();
+        };
+      }
+    });
   });
 
   const completeBtn = document.getElementById('completeFirstInningsBtn');
   if(completeBtn){
     completeBtn.onclick = completeFirstInnings;
   }
+  bindSetupControls();
+}
+
+function bindSetupControls(){
+  ['teamA','teamB'].forEach(teamKey=>{
+    const team = state[teamKey];
+    const setupPlayerInput = document.getElementById('setup-player-'+teamKey);
+    const setupPlayerBtn = document.getElementById('setup-player-btn-'+teamKey);
+    const addSetupPlayer = async ()=>{
+      const name = setupPlayerInput.value.trim();
+      if(!name) return;
+      team.players.push(defaultPlayer(name));
+      await saveState();
+      render();
+    };
+    if(setupPlayerInput && setupPlayerBtn){
+      setupPlayerBtn.onclick = addSetupPlayer;
+      setupPlayerInput.addEventListener('keydown', e=>{
+        if(e.key === 'Enter'){
+          e.preventDefault();
+          addSetupPlayer();
+        }
+      });
+    }
+
+    const setupBowlerInput = document.getElementById('setup-bowler-'+teamKey);
+    const setupBowlerBtn = document.getElementById('setup-bowler-btn-'+teamKey);
+    const addSetupBowler = async ()=>{
+      const name = setupBowlerInput.value.trim();
+      if(!name) return;
+      const bowler = { id: uid(), name, runs: 0, balls: 0, wickets: 0 };
+      team.bowlers.push(bowler);
+      if(!team.activeBowlerId) team.activeBowlerId = bowler.id;
+      await saveState();
+      render();
+    };
+    if(setupBowlerInput && setupBowlerBtn){
+      setupBowlerBtn.onclick = addSetupBowler;
+      setupBowlerInput.addEventListener('keydown', e=>{
+        if(e.key === 'Enter'){
+          e.preventDefault();
+          addSetupBowler();
+        }
+      });
+    }
+  });
+}
+
+function setupPanel(){
+  return `
+    <div class="score-grid">
+      ${setupTeamPanel('teamA')}
+      ${setupTeamPanel('teamB')}
+    </div>
+  `;
+}
+
+function setupTeamPanel(teamKey){
+  const team = state[teamKey];
+  return `
+    <div class="team">
+      <div class="team-head"><h2>${escapeHtml(team.name)} Setup</h2></div>
+      <div class="add-player">
+        <input id="setup-player-${teamKey}" type="text" placeholder="Player ka naam" maxlength="24" />
+        <button type="button" class="btn btn-small" id="setup-player-btn-${teamKey}">Add</button>
+      </div>
+      <div class="add-player">
+        <input id="setup-bowler-${teamKey}" type="text" placeholder="Bowler ka naam" maxlength="24" />
+        <button type="button" class="btn btn-small" id="setup-bowler-btn-${teamKey}">Add</button>
+      </div>
+      <div class="players">
+        <div class="empty">Players: ${team.players.map(p=>escapeHtml(p.name)).join(', ') || 'none'}</div>
+        <div class="empty">Bowlers: ${(team.bowlers || []).map(b=>escapeHtml(b.name)).join(', ') || 'none'}</div>
+      </div>
+    </div>
+  `;
 }
 
 function teamPanel(key){
   const team = state[key];
+  const bowlingTeamKey = opponentKey(key);
+  const bowlingTeam = state[bowlingTeamKey];
   const inningsActionHtml = key === 'teamA' && !state.firstInningsComplete
     ? `<div class="innings-actions">
         <button type="button" class="btn btn-block" id="completeFirstInningsBtn">1st Inning Completed</button>
       </div>`
     : '';
+  const bowlersHtml = (bowlingTeam.bowlers || []).length
+    ? bowlingTeam.bowlers.map(b=>`
+      <div class="player">
+        <div class="player-row1">
+          <span class="player-name">${escapeHtml(b.name)}</span>
+          <span class="player-stats">${b.runs || 0}/${b.wickets || 0}<span class="balls">&nbsp;(${oversDisplay(b.balls || 0)}o)</span></span>
+        </div>
+        <div class="runbtns">
+          <button type="button" class="runbtn extra${bowlingTeam.activeBowlerId === b.id ? ' active' : ''}" id="setbowler-${b.id}">
+            ${bowlingTeam.activeBowlerId === b.id ? 'Bowling' : 'Set Bowler'}
+          </button>
+        </div>
+      </div>
+    `).join('')
+    : `<div class="empty">Bowler add karein</div>`;
   const playersHtml = team.players.length
     ? team.players.map(p=>`
       <div class="player">
@@ -760,6 +1164,14 @@ function teamPanel(key){
         <button type="button" class="runbtn extra" id="noball-${key}">No Ball +1</button>
       </div>
       <div class="players">${playersHtml}</div>
+      <div class="team-head">
+        <input type="text" value="${escapeHtml(bowlingTeam.name)} Bowling" disabled />
+      </div>
+      <div class="add-player">
+        <input id="addbowlerinput-${bowlingTeamKey}" type="text" placeholder="Bowler ka naam" maxlength="24" />
+        <button type="button" class="btn btn-small" id="addbowlerbtn-${bowlingTeamKey}">Add</button>
+      </div>
+      <div class="players">${bowlersHtml}</div>
       ${inningsActionHtml}
     </div>
   `;
@@ -775,7 +1187,7 @@ async function doLogin(){
   const val = document.getElementById('loginName').value.trim();
   if(!val) return;
   currentUser = val;
-  state = defaultState();
+  state = normalizeState(state || defaultState());
   render();
 
   const loaded = await loadState();
@@ -786,8 +1198,18 @@ async function doLogin(){
   watchState();
 }
 
-// initial render (login screen)
-render();
+async function init(){
+  state = defaultState();
+  render();
+  const loaded = await loadState();
+  if(loaded){
+    state = loaded;
+    render();
+  }
+  watchState();
+}
+
+init();
 </script>
 </body>
 </html>
