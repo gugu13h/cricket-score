@@ -141,6 +141,67 @@
     font-size: 13px; color: var(--text-dim); letter-spacing: 2px; padding: 0 14px;
   }
 
+  .crease{
+    grid-column: 1 / -1;
+    display:grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    margin-top: 14px;
+    border-top: 1px solid var(--line);
+    padding-top: 12px;
+  }
+  .batter-card{
+    background: rgba(0,0,0,0.16);
+    border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 4px;
+    padding: 8px 10px;
+    min-width: 0;
+  }
+  .batter-card .label{
+    color: var(--text-dim);
+    font-family:'Share Tech Mono', monospace;
+    font-size: 11px;
+    margin-bottom: 3px;
+  }
+  .batter-card .value{
+    display:flex;
+    justify-content:space-between;
+    gap: 8px;
+    font-family:'Share Tech Mono', monospace;
+    font-size: 14px;
+  }
+  .batter-card .value span:first-child{
+    overflow:hidden;
+    text-overflow:ellipsis;
+    white-space:nowrap;
+  }
+
+  .ball-log{
+    grid-column: 1 / -1;
+    display:flex;
+    flex-wrap:wrap;
+    gap: 6px;
+    justify-content:center;
+    margin-top: 10px;
+  }
+  .ball-chip{
+    min-width: 28px;
+    height: 28px;
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    border-radius: 3px;
+    border: 1px solid var(--line);
+    background: var(--panel-2);
+    color: var(--text);
+    font-family:'Share Tech Mono', monospace;
+    font-size: 12px;
+  }
+  .ball-chip.boundary{color: var(--green-glow); border-color: rgba(62,207,106,0.35);}
+  .ball-chip.wicket{color: #fff; background: var(--red); border-color: var(--red);}
+  .ball-chip.extra{color: var(--amber); border-color: rgba(240,180,41,0.45);}
+  @media (max-width: 560px){ .crease{grid-template-columns: 1fr;} }
+
   /* ---- Team panels ---- */
   .teams{
     display:grid;
@@ -225,6 +286,7 @@
   .runbtn:hover{border-color: var(--amber); color: var(--amber);}
   .runbtn.six{color: var(--green-glow); border-color: rgba(62,207,106,0.3);}
   .runbtn.six:hover{border-color: var(--green-glow);}
+  .runbtn.extra{width:auto; padding: 0 10px; color: var(--amber); border-color: rgba(240,180,41,0.35);}
   .iconbtn{
     background: transparent;
     border: 1px solid var(--line);
@@ -291,8 +353,8 @@ let storageWorks = false; // only true once we've confirmed Firestore reads/writ
 
 function defaultState(){
   return {
-    teamA: { name: 'Team A', players: [] },
-    teamB: { name: 'Team B', players: [] },
+    teamA: { name: 'Team A', players: [], extras: 0, ballLog: [] },
+    teamB: { name: 'Team B', players: [], extras: 0, ballLog: [] },
     firstInningsComplete: false,
     firstInningsBalls: null,
     targetRuns: null
@@ -305,8 +367,8 @@ function normalizeState(raw){
   return {
     ...base,
     ...next,
-    teamA: { ...base.teamA, ...(next.teamA || {}) },
-    teamB: { ...base.teamB, ...(next.teamB || {}) }
+    teamA: { ...base.teamA, ...(next.teamA || {}), ballLog: (next.teamA && next.teamA.ballLog) || [] },
+    teamB: { ...base.teamB, ...(next.teamB || {}), ballLog: (next.teamB && next.teamB.ballLog) || [] }
   };
 }
 
@@ -424,13 +486,33 @@ function oversDisplay(balls){
 }
 
 function teamTotals(team){
-  let runs = 0, balls = 0, outs = 0;
+  let battingRuns = 0, balls = 0, outs = 0;
   team.players.forEach(p=>{
-    runs += p.runs;
+    battingRuns += p.runs;
     balls += p.balls;
     if(p.out) outs++;
   });
-  return {runs, balls, outs};
+  return {runs: battingRuns + (team.extras || 0), battingRuns, extras: team.extras || 0, balls, outs};
+}
+
+function currentBatters(team){
+  return team.players.filter(p=>!p.out).slice(0, 2);
+}
+
+function addBallEvent(teamKey, label, type){
+  const team = state[teamKey];
+  team.ballLog = team.ballLog || [];
+  team.ballLog.push({ id: uid(), label, type });
+  if(team.ballLog.length > 36){
+    team.ballLog = team.ballLog.slice(-36);
+  }
+}
+
+async function addExtra(teamKey, label){
+  state[teamKey].extras = (state[teamKey].extras || 0) + 1;
+  addBallEvent(teamKey, label, 'extra');
+  await saveState();
+  render();
 }
 
 function chaseStatus(totB){
@@ -488,6 +570,25 @@ function render(){
       </div>`
     : '';
   const activeTeamKey = state.firstInningsComplete ? 'teamB' : 'teamA';
+  const activeTeam = state[activeTeamKey];
+  const batters = currentBatters(activeTeam);
+  while(batters.length < 2){
+    batters.push(null);
+  }
+  const battersHtml = batters.slice(0, 2).map((p, idx)=>`
+    <div class="batter-card">
+      <div class="label">Batsman ${idx + 1}</div>
+      <div class="value">
+        <span>${p ? escapeHtml(p.name) : 'Add player'}</span>
+        <strong>${p ? `${p.runs}(${p.balls})` : '0(0)'}</strong>
+      </div>
+    </div>
+  `).join('');
+  const ballLogHtml = (activeTeam.ballLog || []).length
+    ? activeTeam.ballLog.slice(-12).map(ball=>`
+      <span class="ball-chip ${ball.type || ''}">${escapeHtml(ball.label)}</span>
+    `).join('')
+    : `<span class="ball-chip">-</span>`;
 
   app.innerHTML = `
     <div class="masthead">
@@ -504,6 +605,7 @@ function render(){
       <div class="side">
         <h2>${escapeHtml(state.teamA.name)}</h2>
         <div class="score">${totA.runs}/${totA.outs}</div>
+        <div class="overs">Extras ${totA.extras}</div>
         <div class="overs">${oversDisplay(totA.balls)} overs</div>
         <div class="balls-total">${totA.balls} balls</div>
       </div>
@@ -511,9 +613,12 @@ function render(){
       <div class="side">
         <h2>${escapeHtml(state.teamB.name)}</h2>
         <div class="score">${totB.runs}/${totB.outs}</div>
+        <div class="overs">Extras ${totB.extras}</div>
         <div class="overs">${oversDisplay(totB.balls)} overs</div>
         <div class="balls-total">${totB.balls} balls</div>
       </div>
+      <div class="crease">${battersHtml}</div>
+      <div class="ball-log">${ballLogHtml}</div>
       ${chaseHtml}
     </div>
 
@@ -565,6 +670,7 @@ function render(){
           btn.onclick = async ()=>{
             p.runs += n;
             p.balls += 1;
+            addBallEvent(key, String(n), n === 4 || n === 6 ? 'boundary' : '');
             await saveState();
             render();
           };
@@ -575,7 +681,13 @@ function render(){
       const outBtn = document.getElementById('out-'+p.id);
       if(outBtn){
         outBtn.onclick = async ()=>{
-          p.out = !p.out;
+          if(!p.out){
+            p.out = true;
+            p.balls += 1;
+            addBallEvent(key, 'W', 'wicket');
+          }else{
+            p.out = false;
+          }
           await saveState();
           render();
         };
@@ -589,6 +701,15 @@ function render(){
         };
       }
     });
+
+    const wideBtn = document.getElementById('wide-'+key);
+    if(wideBtn){
+      wideBtn.onclick = ()=>addExtra(key, 'Wd');
+    }
+    const noBallBtn = document.getElementById('noball-'+key);
+    if(noBallBtn){
+      noBallBtn.onclick = ()=>addExtra(key, 'Nb');
+    }
   });
 
   const completeBtn = document.getElementById('completeFirstInningsBtn');
@@ -633,6 +754,10 @@ function teamPanel(key){
       <div class="add-player" id="addform-${key}">
         <input id="addinput-${key}" type="text" placeholder="Player ka naam" maxlength="24" />
         <button type="button" class="btn btn-small" id="addbtn-${key}">Add</button>
+      </div>
+      <div class="add-player">
+        <button type="button" class="runbtn extra" id="wide-${key}">Wide +1</button>
+        <button type="button" class="runbtn extra" id="noball-${key}">No Ball +1</button>
       </div>
       <div class="players">${playersHtml}</div>
       ${inningsActionHtml}
