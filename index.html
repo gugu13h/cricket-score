@@ -238,11 +238,35 @@
 <body>
 <div class="wrap" id="app"></div>
 
-<script>
-const STORAGE_KEY = 'cricket-match-state-v1';
+<script type="module">
+import { initializeApp } from 'https://www.gstatic.com/firebasejs/12.16.0/firebase-app.js';
+import {
+  getFirestore,
+  doc,
+  getDoc,
+  onSnapshot,
+  setDoc,
+  serverTimestamp
+} from 'https://www.gstatic.com/firebasejs/12.16.0/firebase-firestore.js';
+
+// Firebase config: paste your web app config values here.
+// Firebase Console > Project settings > General > Your apps > Web app config.
+const firebaseConfig = {
+  apiKey: 'AIzaSyDQReO2ZfJ8MVqIdM2nHC2R622OZ3YHVjE',
+  authDomain: 'cricket-score-a1422.firebaseapp.com',
+  projectId: 'cricket-score-a1422"',
+  storageBucket: 'cricket-score-a1422.firebasestorage.app',
+  messagingSenderId: '1029693418477',
+  appId: '1:1029693418477:web:800ea3e8ccfaf4d73f15e4'
+};
+
+const FIRESTORE_COLLECTION = 'matches';
+const FIRESTORE_DOCUMENT_ID = 'main-scoreboard';
 let currentUser = null;
 let state = null;
-let storageWorks = false; // only true once we've confirmed reads/writes actually succeed
+let db = null;
+let unsubscribeScore = null;
+let storageWorks = false; // only true once we've confirmed Firestore reads/writes actually succeed
 
 function defaultState(){
   return {
@@ -255,19 +279,37 @@ function uid(){
   return Math.random().toString(36).slice(2,9);
 }
 
-function hasStorage(){
-  return typeof window !== 'undefined' && window.storage && typeof window.storage.get === 'function';
+function isFirebaseConfigured(){
+  return Boolean(
+    firebaseConfig.apiKey &&
+    firebaseConfig.authDomain &&
+    firebaseConfig.projectId &&
+    firebaseConfig.appId
+  );
 }
 
-// Loads state from shared storage. Returns null (instead of a default) on
+function getDb(){
+  if(db) return db;
+  if(!isFirebaseConfigured()){
+    console.warn('Firebase config is empty. Add your Firebase web app keys in index.html.');
+    return null;
+  }
+  const app = initializeApp(firebaseConfig);
+  db = getFirestore(app);
+  return db;
+}
+
+// Loads state from Firestore. Returns null (instead of a default) on
 // any failure, so callers never accidentally wipe local unsaved data.
 async function loadState(){
-  if(!hasStorage()) return null;
+  const firestore = getDb();
+  if(!firestore) return null;
   try{
-    const res = await window.storage.get(STORAGE_KEY, true);
-    if(res && res.value){
+    const snap = await getDoc(doc(firestore, FIRESTORE_COLLECTION, FIRESTORE_DOCUMENT_ID));
+    if(snap.exists()){
+      const data = snap.data();
       storageWorks = true;
-      return JSON.parse(res.value);
+      return data.state || defaultState();
     }
     storageWorks = true;
     return defaultState();
@@ -277,13 +319,38 @@ async function loadState(){
 }
 
 async function saveState(){
-  if(!hasStorage()) return;
+  const firestore = getDb();
+  if(!firestore) return;
   try{
-    await window.storage.set(STORAGE_KEY, JSON.stringify(state), true);
+    await setDoc(
+      doc(firestore, FIRESTORE_COLLECTION, FIRESTORE_DOCUMENT_ID),
+      {
+        state,
+        updatedAt: serverTimestamp(),
+        updatedBy: currentUser || 'unknown'
+      },
+      { merge: true }
+    );
     storageWorks = true;
   }catch(e){
     console.error('Save failed', e);
   }
+}
+
+function watchState(){
+  const firestore = getDb();
+  if(!firestore || unsubscribeScore) return;
+
+  unsubscribeScore = onSnapshot(
+    doc(firestore, FIRESTORE_COLLECTION, FIRESTORE_DOCUMENT_ID),
+    snap=>{
+      if(!currentUser || !snap.exists()) return;
+      const data = snap.data();
+      state = data.state || defaultState();
+      render();
+    },
+    e=>console.error('Live Firestore update failed', e)
+  );
 }
 
 function oversDisplay(balls){
@@ -360,7 +427,14 @@ function render(){
     <div class="footer-note">Data yahan sabko dikhta hai &mdash; jo bhi score update karega, sab dekh payenge</div>
   `;
 
-  document.getElementById('logoutBtn').onclick = ()=>{ currentUser = null; render(); };
+  document.getElementById('logoutBtn').onclick = ()=>{
+    currentUser = null;
+    if(unsubscribeScore){
+      unsubscribeScore();
+      unsubscribeScore = null;
+    }
+    render();
+  };
 
   ['teamA','teamB'].forEach(key=>{
     const nameInput = document.getElementById('name-'+key);
@@ -471,23 +545,11 @@ async function doLogin(){
   const loaded = await loadState();
   state = loaded || defaultState(); // only default when storage is truly empty/unavailable, and only once
   render();
+  watchState();
 }
 
 // initial render (login screen)
 render();
-
-// poll for updates from other users every 5s while logged in.
-// If loadState fails (returns null) we simply keep the current in-memory
-// state instead of clobbering it with an empty board.
-setInterval(async ()=>{
-  if(currentUser){
-    const fresh = await loadState();
-    if(fresh){
-      state = fresh;
-      render();
-    }
-  }
-}, 5000);
 </script>
 </body>
 </html>
