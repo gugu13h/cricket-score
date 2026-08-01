@@ -494,6 +494,63 @@
     font-family:'Share Tech Mono', monospace;
     font-size: 12px;
   }
+  .completed-match-card{
+    margin-top: 12px;
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    overflow:hidden;
+    background: var(--panel);
+  }
+  .completed-match-card .card-header{
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--line);
+    background: var(--panel-2);
+    display:flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+  }
+  .completed-match-card .card-header h3{
+    margin:0;
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--text);
+  }
+  .completed-match-card .card-body{
+    padding: 12px 14px 14px;
+  }
+  .completed-match-card .scorecard-section{
+    margin-bottom: 18px;
+  }
+  .completed-match-card .scorecard-section h4{
+    margin: 0 0 8px;
+    font-size: 14px;
+    color: var(--amber);
+  }
+  .completed-match-card .score-table th,
+  .completed-match-card .score-table td{
+    padding: 8px 6px;
+    border-bottom: 1px solid rgba(0,0,0,0.08);
+    text-align:left;
+  }
+  .completed-match-card .score-table th{
+    background: rgba(237,242,247,0.8);
+    color: var(--text-dim);
+    font-weight: 500;
+  }
+  .completed-match-card .summary-row{
+    display:flex;
+    justify-content:space-between;
+    gap:12px;
+    flex-wrap:wrap;
+    margin-top: 8px;
+    color: var(--text-dim);
+    font-family:'Share Tech Mono', monospace;
+    font-size: 13px;
+  }
+  .completed-match-card .summary-row span{
+    display:inline-block;
+  }
 
   .chase-info{
     grid-column: 1 / -1;
@@ -1098,26 +1155,125 @@ function dateText(timestamp){
   });
 }
 
+function completedMatchBattingTable(team){
+  return team.players.length
+    ? team.players.map(p=>{
+      const counts = p.runCounts || {};
+      return `
+        <tr>
+          <td>${escapeHtml(p.name)}${p.out ? ' (out)' : ''}</td>
+          <td>${p.runs}</td>
+          <td>${p.balls}</td>
+          <td>${counts[4] || 0}</td>
+          <td>${counts[6] || 0}</td>
+          <td>${strikeRate(p)}</td>
+        </tr>
+      `;
+    }).join('')
+    : `<tr><td colspan="6">No batsman added</td></tr>`;
+}
+
+function completedMatchBowlingTable(team){
+  return (team.bowlers || []).length
+    ? team.bowlers.map(b=>`
+      <tr>
+        <td>${escapeHtml(b.name)}</td>
+        <td>${b.runs || 0}</td>
+        <td>${b.wickets || 0}</td>
+        <td>${oversDisplay(b.balls || 0)}</td>
+        <td>${economy(b)}</td>
+      </tr>
+    `).join('')
+    : `<tr><td colspan="5">No bowler added</td></tr>`;
+}
+
+function completedMatchScorecardHtml(match){
+  const teamA = match.teamA;
+  const teamB = match.teamB;
+  return `
+    <div class="completed-match-card">
+      <div class="card-header">
+        <div>
+          <h3>${escapeHtml(teamA.name)} vs ${escapeHtml(teamB.name)}</h3>
+          <div class="summary-row">
+            <span>${escapeHtml(match.result || 'Match completed')}</span>
+            <span>${teamA.runs}/${teamA.players.filter(p=>p.out).length} &amp; ${teamB.runs}/${teamB.players.filter(p=>p.out).length}</span>
+            <span>Completed ${dateText(match.completedAt)}</span>
+          </div>
+        </div>
+      </div>
+      <div class="card-body">
+        <div class="scorecard-section">
+          <h4>${escapeHtml(teamA.name)} batting</h4>
+          <table class="score-table">
+            <thead>
+              <tr><th>Batsman</th><th>R</th><th>B</th><th>4s</th><th>6s</th><th>SR</th></tr>
+            </thead>
+            <tbody>${completedMatchBattingTable(teamA)}</tbody>
+          </table>
+          <div class="summary-row">
+            <span>Extras: ${teamA.extras || 0}</span>
+            <span>Total: ${match.totals.teamA.runs}/${match.totals.teamA.outs}</span>
+            <span>Overs: ${oversDisplay(match.totals.teamA.balls)}</span>
+          </div>
+        </div>
+        <div class="scorecard-section">
+          <h4>${escapeHtml(teamB.name)} bowling</h4>
+          <table class="score-table">
+            <thead>
+              <tr><th>Bowler</th><th>R</th><th>W</th><th>O</th><th>Econ</th></tr>
+            </thead>
+            <tbody>${completedMatchBowlingTable(teamB)}</tbody>
+          </table>
+        </div>
+        <div class="scorecard-section">
+          <h4>${escapeHtml(teamB.name)} batting</h4>
+          <table class="score-table">
+            <thead>
+              <tr><th>Batsman</th><th>R</th><th>B</th><th>4s</th><th>6s</th><th>SR</th></tr>
+            </thead>
+            <tbody>${completedMatchBattingTable(teamB)}</tbody>
+          </table>
+          <div class="summary-row">
+            <span>Extras: ${teamB.extras || 0}</span>
+            <span>Total: ${match.totals.teamB.runs}/${match.totals.teamB.outs}</span>
+            <span>Overs: ${oversDisplay(match.totals.teamB.balls)}</span>
+          </div>
+        </div>
+        <div class="scorecard-section">
+          <h4>${escapeHtml(teamA.name)} bowling</h4>
+          <table class="score-table">
+            <thead>
+              <tr><th>Bowler</th><th>R</th><th>W</th><th>O</th><th>Econ</th></tr>
+            </thead>
+            <tbody>${completedMatchBowlingTable(teamA)}</tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
 function completedMatchesHtml(){
   const matches = pruneCompletedMatches(state.completedMatches || []);
   if(!matches.length){
     return `
       <div class="match-history">
         <h2>Completed matches</h2>
-        <div class="empty">Last 2 weeks mein completed match record nahi hai.</div>
+        <div class="empty">Completed match record abhi available nahi hai.</div>
       </div>
     `;
   }
 
   return `
     <div class="match-history">
-      <h2>Completed matches - last 2 weeks</h2>
+      <h2>Completed matches</h2>
       <div class="history-list">
         ${matches.map(match=>`
           <div class="history-match">
             <div class="history-title">${escapeHtml(match.teamA.name)} vs ${escapeHtml(match.teamB.name)}</div>
-            <div class="history-score">${match.totals.teamA.runs}/${match.totals.teamA.outs} - ${match.totals.teamB.runs}/${match.totals.teamB.outs}</div>
-            <div class="history-meta">${escapeHtml(match.result || 'Match completed')} | Completed ${dateText(match.completedAt)} | Expires ${dateText(match.expiresAt)}</div>
+            <div class="history-score">${escapeHtml(match.result || 'Match completed')}</div>
+            <div class="history-meta">${dateText(match.completedAt)}</div>
           </div>
         `).join('')}
       </div>
