@@ -8,25 +8,22 @@
   @import url('https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600;700&family=Share+Tech+Mono&display=swap');
 
   :root{
-    --bg: #081b12;
-    --panel: #0f2b1c;
-    --panel-2: #12331f;
-    --line: #1e4a2c;
-    --amber: #f0b429;
-    --amber-dim: #7a5c14;
-    --red: #d94a3d;
-    --text: #eef3ea;
-    --text-dim: #93a894;
-    --green-glow: #3ecf6a;
+    --bg: #f8fafc;
+    --panel: #ffffff;
+    --panel-2: #eef2f7;
+    --line: #cbd5e1;
+    --amber: #f59e0b;
+    --amber-dim: #b45309;
+    --red: #dc2626;
+    --text: #0f172a;
+    --text-dim: #475569;
+    --green-glow: #22c55e;
   }
   *{box-sizing:border-box;}
   body{
     margin:0;
-    background: var(--bg);
-    background-image:
-      radial-gradient(ellipse at top, rgba(62,207,106,0.08), transparent 60%),
-      repeating-linear-gradient(90deg, rgba(255,255,255,0.015) 0 1px, transparent 1px 40px);
-    color: var(--text);
+    background: #ffffff;
+    color: #111111;
     font-family: 'Oswald', sans-serif;
     min-height:100vh;
     padding: 24px 16px 60px;
@@ -94,7 +91,7 @@
   .score-table th,
   .score-table td{
     padding: 8px 6px;
-    border-bottom: 1px solid rgba(255,255,255,0.06);
+    border-bottom: 1px solid rgba(0,0,0,0.08);
     text-align:left;
   }
   .score-table th{
@@ -137,7 +134,7 @@
   }
   .btn{
     background: var(--amber);
-    color: #241a03;
+    color: #ffffff;
     border: none;
     padding: 12px 18px;
     font-family:'Oswald', sans-serif;
@@ -267,7 +264,7 @@
     font-family:'Share Tech Mono', monospace;
     font-size: 12px;
   }
-  .ball-chip.boundary{color: var(--green-glow); border-color: rgba(62,207,106,0.35);}
+  .ball-chip.boundary{color: var(--green-glow); border-color: rgba(126,220,156,0.35);}
   .ball-chip.wicket{color: #fff; background: var(--red); border-color: var(--red);}
   .ball-chip.extra{color: var(--amber); border-color: rgba(240,180,41,0.45);}
   @media (max-width: 560px){ .crease{grid-template-columns: 1fr;} }
@@ -354,7 +351,7 @@
     font-size: 13px;
   }
   .runbtn:hover{border-color: var(--amber); color: var(--amber);}
-  .runbtn.six{color: var(--green-glow); border-color: rgba(62,207,106,0.3);}
+  .runbtn.six{color: var(--green-glow); border-color: rgba(126,220,156,0.3);}
   .runbtn.six:hover{border-color: var(--green-glow);}
   .runbtn.extra{width:auto; padding: 0 10px; color: var(--amber); border-color: rgba(240,180,41,0.35);}
   .runbtn.active{background: var(--amber); color:#241a03; border-color: var(--amber);}
@@ -442,8 +439,6 @@
 
 // Firebase config: paste your Firebase Web app config values here.
 // Find it in Firebase Console > Project settings > General > Your apps > Web app.
-import { initializeApp } from "https://www.gstatic.com/firebasejs/12.1.0/firebase-app.js";
-import { getFirestore } from "https://www.gstatic.com/firebasejs/12.1.0/firebase-firestore.js";
  const firebaseConfig = {
   apiKey: "AIzaSyDQReO2ZfJ8MVqIdM2nHC2R622OZ3YHVjE",
   authDomain: "cricket-score-a1422.firebaseapp.com",
@@ -453,13 +448,11 @@ import { getFirestore } from "https://www.gstatic.com/firebasejs/12.1.0/firebase
   appId: "1:1029693418477:web:92971ba875585b2a3f15e4",
   measurementId: "G-TQPXE34ZY7"
 };
-// Initialize Firebase
-const app = initializeApp(firebaseConfig);
-const analytics = getAnalytics(app);
 
 const FIRESTORE_COLLECTION = 'matches';
 const FIRESTORE_DOCUMENT_ID = 'main-scoreboard';
 const COMPLETED_MATCH_RETENTION_MS = 14 * 24 * 60 * 60 * 1000;
+const FIREBASE_SDK_VERSION = '12.1.0';
 let currentUser = null;
 let state = null;
 let db = null;
@@ -555,8 +548,8 @@ async function loadFirebaseApi(){
 
   try{
     const [appModule, firestoreModule] = await Promise.all([
-      import('https://www.gstatic.com/firebasejs/12.16.0/firebase-app.js'),
-      import('https://www.gstatic.com/firebasejs/12.16.0/firebase-firestore.js')
+      import(`https://www.gstatic.com/firebasejs/${FIREBASE_SDK_VERSION}/firebase-app.js`),
+      import(`https://www.gstatic.com/firebasejs/${FIREBASE_SDK_VERSION}/firebase-firestore.js`)
     ]);
     firebaseApi = {
       initializeApp: appModule.initializeApp,
@@ -578,9 +571,14 @@ async function getDb(){
   if(db) return db;
   const api = await loadFirebaseApi();
   if(!api) return null;
-  const app = api.initializeApp(firebaseConfig);
-  db = api.getFirestore(app);
-  return db;
+  try{
+    const app = api.initializeApp(firebaseConfig);
+    db = api.getFirestore(app);
+    return db;
+  }catch(e){
+    console.error('Firebase init failed', e);
+    return null;
+  }
 }
 
 // Loads state from Firestore. Returns null (instead of a default) on
