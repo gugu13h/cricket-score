@@ -71,6 +71,31 @@
     margin-bottom: 14px;
   }
   .login-card input:focus{outline:none; border-color: var(--amber);}
+  .field{
+    display:grid;
+    gap: 6px;
+    margin-bottom: 12px;
+  }
+  .field label{
+    color: var(--text-dim);
+    font-family:'Share Tech Mono', monospace;
+    font-size: 12px;
+    text-transform: uppercase;
+  }
+  .field input,
+  .field select{
+    width:100%;
+    padding: 10px 12px;
+    background: var(--panel-2);
+    border: 1px solid var(--line);
+    border-radius: 3px;
+    color: var(--text);
+    font-family:'Oswald',sans-serif;
+    font-size: 15px;
+  }
+  .field input:focus,
+  .field select:focus{outline:none; border-color: var(--amber);}
+  .team > .field{padding: 12px 14px 0;}
   .public-login{
     max-width: 380px;
     margin: 26px auto 0;
@@ -108,6 +133,41 @@
   }
   .score-table td:last-child,
   .score-table th:last-child{text-align:right;}
+  .match-details{
+    margin: 18px 0 24px;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: 16px;
+  }
+  .match-details h2{
+    margin: 0 0 12px;
+    font-size: 18px;
+  }
+  .detail-grid{
+    display:grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 10px;
+  }
+  @media (max-width: 720px){ .detail-grid{grid-template-columns: 1fr 1fr;} }
+  .detail-item{
+    background: var(--panel-2);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: 10px;
+    min-width: 0;
+  }
+  .detail-item .label{
+    color: var(--text-dim);
+    font-family:'Share Tech Mono', monospace;
+    font-size: 11px;
+    text-transform: uppercase;
+  }
+  .detail-item .value{
+    margin-top: 4px;
+    font-size: 18px;
+    overflow-wrap: anywhere;
+  }
   .search-panel{
     margin-top: 18px;
     background: var(--panel);
@@ -308,8 +368,10 @@
     padding: 12px 14px;
     border-bottom: 1px solid var(--line);
   }
-  .add-player input{
+  .add-player input,
+  .add-player select{
     flex:1;
+    min-width:0;
     background: var(--panel-2);
     border: 1px solid var(--line);
     border-radius: 3px;
@@ -318,7 +380,8 @@
     font-family:'Oswald', sans-serif;
     font-size: 14px;
   }
-  .add-player input:focus{outline:none; border-color: var(--amber);}
+  .add-player input:focus,
+  .add-player select:focus{outline:none; border-color: var(--amber);}
 
   .players{padding: 8px 10px 14px;}
   .player{
@@ -326,6 +389,24 @@
     padding: 10px 4px;
   }
   .player:last-child{border-bottom:none;}
+  .player-edit{
+    display:flex;
+    align-items:center;
+    gap: 8px;
+    margin-bottom: 8px;
+  }
+  .player-edit input{
+    flex:1;
+    min-width:0;
+    background: var(--panel-2);
+    border: 1px solid var(--line);
+    color: var(--text);
+    border-radius: 3px;
+    padding: 8px 10px;
+    font-family:'Oswald', sans-serif;
+    font-size: 15px;
+  }
+  .player-edit input:focus{outline:none; border-color: var(--amber);}
   .player-row1{
     display:flex; justify-content:space-between; align-items:center;
     margin-bottom: 8px;
@@ -470,8 +551,9 @@ let storageWorks = false; // only true once we've confirmed Firestore reads/writ
 
 function defaultState(){
   return {
-    teamA: { name: 'Team A', players: [], bowlers: [], activeBowlerId: null, extras: 0, ballLog: [] },
-    teamB: { name: 'Team B', players: [], bowlers: [], activeBowlerId: null, extras: 0, ballLog: [] },
+    teamA: { name: 'Team A', players: [], bowlers: [], activeBatterIds: [], activeBowlerId: null, extras: 0, ballLog: [] },
+    teamB: { name: 'Team B', players: [], bowlers: [], activeBatterIds: [], activeBowlerId: null, extras: 0, ballLog: [] },
+    matchOvers: 4,
     firstInningsComplete: false,
     firstInningsBalls: null,
     targetRuns: null,
@@ -506,7 +588,7 @@ function normalizeBowler(bowler){
 function normalizeState(raw){
   const base = defaultState();
   const next = raw && typeof raw === 'object' ? raw : {};
-  return {
+  const normalized = {
     ...base,
     ...next,
     teamA: {
@@ -523,8 +605,48 @@ function normalizeState(raw){
       players: ((next.teamB && next.teamB.players) || []).map(normalizePlayer),
       bowlers: ((next.teamB && next.teamB.bowlers) || []).map(normalizeBowler)
     },
+    matchOvers: clampMatchOvers(next.matchOvers || base.matchOvers),
     completedMatches: pruneCompletedMatches(next.completedMatches || [])
   };
+  normalizeTeamSelection(normalized.teamA);
+  normalizeTeamSelection(normalized.teamB);
+  syncBowlerNames(normalized.teamA);
+  syncBowlerNames(normalized.teamB);
+  return normalized;
+}
+
+function clampMatchOvers(value){
+  const overs = Number(value);
+  if(!Number.isFinite(overs)) return 4;
+  return Math.min(20, Math.max(4, Math.floor(overs)));
+}
+
+function normalizeTeamSelection(team){
+  const playerIds = new Set(team.players.map(p=>p.id));
+  const selected = Array.isArray(team.activeBatterIds)
+    ? team.activeBatterIds.filter(id=>playerIds.has(id) && team.players.some(p=>p.id === id && !p.out))
+    : [];
+  const uniqueSelected = [];
+  selected.forEach(id=>{
+    if(!uniqueSelected.includes(id)) uniqueSelected.push(id);
+  });
+  selected.length = 0;
+  selected.push(...uniqueSelected);
+  team.players.filter(p=>!p.out && !selected.includes(p.id)).slice(0, 2).forEach(p=>{
+    if(selected.length < 2) selected.push(p.id);
+  });
+  team.activeBatterIds = selected.slice(0, 2);
+  if(team.activeBowlerId && !playerIds.has(team.activeBowlerId)){
+    team.activeBowlerId = null;
+  }
+}
+
+function syncBowlerNames(team){
+  team.bowlers = (team.bowlers || []).filter(b=>team.players.some(p=>p.id === b.id));
+  team.bowlers.forEach(b=>{
+    const player = team.players.find(p=>p.id === b.id);
+    if(player) b.name = player.name;
+  });
 }
 
 function pruneCompletedMatches(matches){
@@ -671,7 +793,10 @@ function teamTotals(team){
 }
 
 function currentBatters(team){
-  return team.players.filter(p=>!p.out).slice(0, 2);
+  const selected = (team.activeBatterIds || [])
+    .map(id=>team.players.find(p=>p.id === id && !p.out))
+    .filter(Boolean);
+  return selected.length ? selected : team.players.filter(p=>!p.out).slice(0, 2);
 }
 
 function opponentKey(teamKey){
@@ -680,7 +805,11 @@ function opponentKey(teamKey){
 
 function activeBowler(teamKey){
   const team = state[teamKey];
-  return (team.bowlers || []).find(b=>b.id === team.activeBowlerId) || null;
+  if(!team.activeBowlerId) return null;
+  const player = team.players.find(p=>p.id === team.activeBowlerId);
+  if(!player) return null;
+  const bowler = (team.bowlers || []).find(b=>b.id === team.activeBowlerId);
+  return bowler ? { ...bowler, name: player.name } : { id: player.id, name: player.name, runs: 0, balls: 0, wickets: 0 };
 }
 
 function economy(bowler){
@@ -703,8 +832,17 @@ function bowlerDetailText(bowler){
 }
 
 function creditBowler(bowlingTeamKey, runs, legalBall, wicket){
-  const bowler = activeBowler(bowlingTeamKey);
-  if(!bowler) return;
+  const team = state[bowlingTeamKey];
+  if(!team.activeBowlerId) return;
+  const player = team.players.find(p=>p.id === team.activeBowlerId);
+  if(!player) return;
+  team.bowlers = team.bowlers || [];
+  let bowler = team.bowlers.find(b=>b.id === team.activeBowlerId);
+  if(!bowler){
+    bowler = { id: player.id, name: player.name, runs: 0, balls: 0, wickets: 0 };
+    team.bowlers.push(bowler);
+  }
+  bowler.name = player.name;
   bowler.runs = (bowler.runs || 0) + runs;
   bowler.balls = (bowler.balls || 0) + (legalBall ? 1 : 0);
   bowler.wickets = (bowler.wickets || 0) + (wicket ? 1 : 0);
@@ -793,7 +931,7 @@ function scoreboardSummaryHtml(activeTeamKey){
 function chaseStatus(totB){
   if(!state.firstInningsComplete) return null;
   const target = state.targetRuns || 0;
-  const totalBalls = state.firstInningsBalls || 0;
+  const totalBalls = state.firstInningsBalls || (state.matchOvers * 6);
   const runsNeeded = Math.max(target - totB.runs, 0);
   const ballsLeft = Math.max(totalBalls - totB.balls, 0);
   const won = runsNeeded === 0;
@@ -804,7 +942,7 @@ function chaseStatus(totB){
 async function completeFirstInnings(){
   const totA = teamTotals(state.teamA);
   state.firstInningsComplete = true;
-  state.firstInningsBalls = totA.balls;
+  state.firstInningsBalls = state.matchOvers * 6;
   state.targetRuns = totA.runs + 1;
   await saveState();
   render();
@@ -896,14 +1034,21 @@ function battingRows(team){
 }
 
 function bowlingRows(team){
-  return (team.bowlers || []).length
-    ? team.bowlers.map(b=>`
+  return team.players.length
+    ? team.players.map(player=>{
+      const b = bowlerStatsForPlayer(team, player.id);
+      return `
       <tr>
-        <td><button type="button" class="bowler-detail-btn" data-bowler-id="${b.id}">${escapeHtml(b.name)}</button></td>
+        <td><button type="button" class="bowler-detail-btn" data-bowler-id="${player.id}">${escapeHtml(player.name)}</button></td>
         <td>${b.runs || 0}/${b.wickets || 0} (${oversDisplay(b.balls || 0)})</td>
       </tr>
-    `).join('')
-    : `<tr><td colspan="2">No bowler added</td></tr>`;
+    `;
+    }).join('')
+    : `<tr><td colspan="2">No player added</td></tr>`;
+}
+
+function bowlerStatsForPlayer(team, playerId){
+  return (team.bowlers || []).find(b=>b.id === playerId) || { id: playerId, runs: 0, balls: 0, wickets: 0 };
 }
 
 function livePageHtml(activeTeamKey){
@@ -974,7 +1119,10 @@ function allPlayers(){
 }
 
 function allBowlers(){
-  return [...state.teamA.bowlers, ...state.teamB.bowlers];
+  return [
+    ...state.teamA.players.map(p=>({ ...bowlerStatsForPlayer(state.teamA, p.id), name: p.name })),
+    ...state.teamB.players.map(p=>({ ...bowlerStatsForPlayer(state.teamB, p.id), name: p.name }))
+  ];
 }
 
 function bindPublicDetails(){
@@ -1037,12 +1185,14 @@ function render(){
       <button class="btn btn-ghost btn-small" id="logoutBtn">Logout</button>
     </div>
 
-    ${scoreboardSummaryHtml(activeTeamKey)}
-
     ${setupPanel()}
 
+    ${matchDetailsHtml(activeTeamKey)}
+
+    ${scoreboardSummaryHtml(activeTeamKey)}
+
     <div class="teams single">
-      ${teamPanel(activeTeamKey)}
+      ${scoringPanel(activeTeamKey)}
     </div>
 
     ${completedMatchesHtml()}
@@ -1076,13 +1226,15 @@ function render(){
       await saveState();
       render();
     };
-    addBtn.addEventListener('click', addPlayerNow);
-    addInput.addEventListener('keydown', (e)=>{
-      if(e.key === 'Enter'){
-        e.preventDefault();
-        addPlayerNow();
-      }
-    });
+    if(addBtn && addInput){
+      addBtn.addEventListener('click', addPlayerNow);
+      addInput.addEventListener('keydown', (e)=>{
+        if(e.key === 'Enter'){
+          e.preventDefault();
+          addPlayerNow();
+        }
+      });
+    }
 
     state[key].players.forEach(p=>{
       const addRunBtn = (n)=>{
@@ -1136,37 +1288,28 @@ function render(){
       noBallBtn.onclick = ()=>addExtra(key, 'Nb');
     }
 
-    const bowlingTeamKey = opponentKey(key);
-    const addBowlerBtn = document.getElementById('addbowlerbtn-'+bowlingTeamKey);
-    const addBowlerInput = document.getElementById('addbowlerinput-'+bowlingTeamKey);
-    const addBowlerNow = async ()=>{
-      const name = addBowlerInput.value.trim();
-      if(!name) return;
-      const bowler = { id: uid(), name, runs: 0, balls: 0, wickets: 0 };
-      state[bowlingTeamKey].bowlers.push(bowler);
-      state[bowlingTeamKey].activeBowlerId = bowler.id;
-      await saveState();
-      render();
-    };
-    if(addBowlerBtn && addBowlerInput){
-      addBowlerBtn.addEventListener('click', addBowlerNow);
-      addBowlerInput.addEventListener('keydown', e=>{
-        if(e.key === 'Enter'){
-          e.preventDefault();
-          addBowlerNow();
-        }
-      });
-    }
-    (state[bowlingTeamKey].bowlers || []).forEach(b=>{
-      const setBtn = document.getElementById('setbowler-'+b.id);
-      if(setBtn){
-        setBtn.onclick = async ()=>{
-          state[bowlingTeamKey].activeBowlerId = b.id;
+    [0,1].forEach(idx=>{
+      const batterSelect = document.getElementById(`batterselect-${key}-${idx}`);
+      if(batterSelect){
+        batterSelect.onchange = async ()=>{
+          state[key].activeBatterIds = state[key].activeBatterIds || [];
+          state[key].activeBatterIds[idx] = batterSelect.value || null;
+          state[key].activeBatterIds = state[key].activeBatterIds.filter(Boolean);
           await saveState();
           render();
         };
       }
     });
+
+    const bowlingTeamKey = opponentKey(key);
+    const bowlerSelect = document.getElementById('bowlerselect-'+bowlingTeamKey);
+    if(bowlerSelect){
+      bowlerSelect.onchange = async ()=>{
+        state[bowlingTeamKey].activeBowlerId = bowlerSelect.value || null;
+        await saveState();
+        render();
+      };
+    }
   });
 
   const completeBtn = document.getElementById('completeFirstInningsBtn');
@@ -1181,8 +1324,29 @@ function render(){
 }
 
 function bindSetupControls(){
+  const oversSelect = document.getElementById('matchOvers');
+  if(oversSelect){
+    oversSelect.onchange = async ()=>{
+      state.matchOvers = clampMatchOvers(oversSelect.value);
+      if(state.firstInningsComplete){
+        state.firstInningsBalls = state.matchOvers * 6;
+      }
+      await saveState();
+      render();
+    };
+  }
+
   ['teamA','teamB'].forEach(teamKey=>{
     const team = state[teamKey];
+    const setupTeamName = document.getElementById('setup-team-name-'+teamKey);
+    if(setupTeamName){
+      setupTeamName.onchange = async ()=>{
+        team.name = setupTeamName.value.trim() || (teamKey === 'teamA' ? 'Team A' : 'Team B');
+        await saveState();
+        render();
+      };
+    }
+
     const setupPlayerInput = document.getElementById('setup-player-'+teamKey);
     const setupPlayerBtn = document.getElementById('setup-player-btn-'+teamKey);
     const addSetupPlayer = async ()=>{
@@ -1202,34 +1366,100 @@ function bindSetupControls(){
       });
     }
 
-    const setupBowlerInput = document.getElementById('setup-bowler-'+teamKey);
-    const setupBowlerBtn = document.getElementById('setup-bowler-btn-'+teamKey);
-    const addSetupBowler = async ()=>{
-      const name = setupBowlerInput.value.trim();
-      if(!name) return;
-      const bowler = { id: uid(), name, runs: 0, balls: 0, wickets: 0 };
-      team.bowlers.push(bowler);
-      if(!team.activeBowlerId) team.activeBowlerId = bowler.id;
-      await saveState();
-      render();
-    };
-    if(setupBowlerInput && setupBowlerBtn){
-      setupBowlerBtn.onclick = addSetupBowler;
-      setupBowlerInput.addEventListener('keydown', e=>{
-        if(e.key === 'Enter'){
-          e.preventDefault();
-          addSetupBowler();
-        }
-      });
-    }
+    team.players.forEach(player=>{
+      const editInput = document.getElementById(`setup-player-name-${teamKey}-${player.id}`);
+      if(editInput){
+        editInput.onchange = async ()=>{
+          player.name = editInput.value.trim() || player.name;
+          const bowler = (team.bowlers || []).find(b=>b.id === player.id);
+          if(bowler) bowler.name = player.name;
+          await saveState();
+          render();
+        };
+      }
+      const deleteBtn = document.getElementById(`setup-player-delete-${teamKey}-${player.id}`);
+      if(deleteBtn){
+        deleteBtn.onclick = async ()=>{
+          team.players = team.players.filter(p=>p.id !== player.id);
+          team.bowlers = (team.bowlers || []).filter(b=>b.id !== player.id);
+          team.activeBatterIds = (team.activeBatterIds || []).filter(id=>id !== player.id);
+          if(team.activeBowlerId === player.id) team.activeBowlerId = null;
+          await saveState();
+          render();
+        };
+      }
+    });
   });
 }
 
 function setupPanel(){
   return `
+    <div class="match-details">
+      <h2>Match Setup</h2>
+      <div class="field">
+        <label for="matchOvers">Match overs</label>
+        <select id="matchOvers">
+          ${oversOptionsHtml()}
+        </select>
+      </div>
+    </div>
     <div class="score-grid">
       ${setupTeamPanel('teamA')}
       ${setupTeamPanel('teamB')}
+    </div>
+  `;
+}
+
+function oversOptionsHtml(){
+  let options = '';
+  for(let over = 4; over <= 20; over++){
+    options += `<option value="${over}"${state.matchOvers === over ? ' selected' : ''}>${over} overs</option>`;
+  }
+  return options;
+}
+
+function matchDetailsHtml(activeTeamKey){
+  const totA = teamTotals(state.teamA);
+  const totB = teamTotals(state.teamB);
+  const activeTeam = state[activeTeamKey];
+  const bowlingTeam = state[opponentKey(activeTeamKey)];
+  return `
+    <div class="match-details">
+      <h2>Match Details</h2>
+      <div class="detail-grid">
+        <div class="detail-item">
+          <div class="label">Teams</div>
+          <div class="value">${escapeHtml(state.teamA.name)} vs ${escapeHtml(state.teamB.name)}</div>
+        </div>
+        <div class="detail-item">
+          <div class="label">Overs</div>
+          <div class="value">${state.matchOvers} overs</div>
+        </div>
+        <div class="detail-item">
+          <div class="label">Current batting</div>
+          <div class="value">${escapeHtml(activeTeam.name)}</div>
+        </div>
+        <div class="detail-item">
+          <div class="label">Bowling team</div>
+          <div class="value">${escapeHtml(bowlingTeam.name)}</div>
+        </div>
+        <div class="detail-item">
+          <div class="label">${escapeHtml(state.teamA.name)}</div>
+          <div class="value">${totA.runs}/${totA.outs} (${oversDisplay(totA.balls)})</div>
+        </div>
+        <div class="detail-item">
+          <div class="label">${escapeHtml(state.teamB.name)}</div>
+          <div class="value">${totB.runs}/${totB.outs} (${oversDisplay(totB.balls)})</div>
+        </div>
+        <div class="detail-item">
+          <div class="label">Players</div>
+          <div class="value">${state.teamA.players.length} / ${state.teamB.players.length}</div>
+        </div>
+        <div class="detail-item">
+          <div class="label">Target</div>
+          <div class="value">${state.firstInningsComplete ? state.targetRuns : 'After 1st innings'}</div>
+        </div>
+      </div>
     </div>
   `;
 }
@@ -1239,20 +1469,31 @@ function setupTeamPanel(teamKey){
   return `
     <div class="team">
       <div class="team-head"><h2>${escapeHtml(team.name)} Setup</h2></div>
+      <div class="field">
+        <label for="setup-team-name-${teamKey}">Team name</label>
+        <input id="setup-team-name-${teamKey}" type="text" value="${escapeHtml(team.name)}" maxlength="24" />
+      </div>
       <div class="add-player">
         <input id="setup-player-${teamKey}" type="text" placeholder="Player ka naam" maxlength="24" />
         <button type="button" class="btn btn-small" id="setup-player-btn-${teamKey}">Add</button>
       </div>
-      <div class="add-player">
-        <input id="setup-bowler-${teamKey}" type="text" placeholder="Bowler ka naam" maxlength="24" />
-        <button type="button" class="btn btn-small" id="setup-bowler-btn-${teamKey}">Add</button>
-      </div>
       <div class="players">
-        <div class="empty">Players: ${team.players.map(p=>escapeHtml(p.name)).join(', ') || 'none'}</div>
-        <div class="empty">Bowlers: ${(team.bowlers || []).map(b=>escapeHtml(b.name)).join(', ') || 'none'}</div>
+        ${editablePlayersHtml(teamKey)}
       </div>
     </div>
   `;
+}
+
+function editablePlayersHtml(teamKey){
+  const team = state[teamKey];
+  return team.players.length
+    ? team.players.map(player=>`
+      <div class="player-edit">
+        <input id="setup-player-name-${teamKey}-${player.id}" type="text" value="${escapeHtml(player.name)}" maxlength="24" />
+        <button type="button" class="iconbtn" id="setup-player-delete-${teamKey}-${player.id}" title="Player hataayein">X</button>
+      </div>
+    `).join('')
+    : `<div class="empty">Abhi koi player nahi joda gaya</div>`;
 }
 
 function teamPanel(key){
@@ -1319,14 +1560,81 @@ function teamPanel(key){
       <div class="team-head">
         <input type="text" value="${escapeHtml(bowlingTeam.name)} Bowling" disabled />
       </div>
-      <div class="add-player">
-        <input id="addbowlerinput-${bowlingTeamKey}" type="text" placeholder="Bowler ka naam" maxlength="24" />
-        <button type="button" class="btn btn-small" id="addbowlerbtn-${bowlingTeamKey}">Add</button>
-      </div>
       <div class="players">${bowlersHtml}</div>
       ${inningsActionHtml}
     </div>
   `;
+}
+
+function scoringPanel(key){
+  const team = state[key];
+  const bowlingTeamKey = opponentKey(key);
+  const bowlingTeam = state[bowlingTeamKey];
+  const selectedBatters = currentBatters(team);
+  const bowler = activeBowler(bowlingTeamKey);
+  const inningsActionHtml = key === 'teamA' && !state.firstInningsComplete
+    ? `<div class="innings-actions">
+        <button type="button" class="btn btn-block" id="completeFirstInningsBtn">1st Inning Completed</button>
+      </div>`
+    : `<div class="innings-actions">
+        <button type="button" class="btn btn-block" id="completeMatchBtn">Match Completed - Save 2 Weeks</button>
+      </div>`;
+  const playersHtml = selectedBatters.length
+    ? selectedBatters.map(p=>`
+      <div class="player">
+        <div class="player-row1">
+          <span class="player-name${p.out? ' out':''}">${escapeHtml(p.name)}${p.out? ' (out)':''}</span>
+          <span class="player-stats">${p.runs}<span class="balls">&nbsp;(${p.balls}b)</span></span>
+        </div>
+        <div class="runbtns">
+          <button class="runbtn" id="run-${p.id}-0">0</button>
+          <button class="runbtn" id="run-${p.id}-1">1</button>
+          <button class="runbtn" id="run-${p.id}-2">2</button>
+          <button class="runbtn" id="run-${p.id}-3">3</button>
+          <button class="runbtn" id="run-${p.id}-4">4</button>
+          <button class="runbtn six" id="run-${p.id}-6">6</button>
+          <button class="iconbtn out-toggle" id="out-${p.id}" title="Out / Not out">${p.out ? 'Undo' : 'Out'}</button>
+        </div>
+      </div>
+    `).join('')
+    : `<div class="empty">Dropdown se batsman select karein</div>`;
+
+  return `
+    <div class="team">
+      <div class="team-head">
+        <input id="name-${key}" type="text" value="${escapeHtml(team.name)}" maxlength="24" />
+      </div>
+      <div class="add-player" id="addform-${key}">
+        <select id="batterselect-${key}-0">${playerOptionsHtml(team, team.activeBatterIds[0], 'Batsman 1 select karein')}</select>
+        <select id="batterselect-${key}-1">${playerOptionsHtml(team, team.activeBatterIds[1], 'Batsman 2 select karein')}</select>
+      </div>
+      <div class="add-player">
+        <button type="button" class="runbtn extra" id="wide-${key}">Wide +1</button>
+        <button type="button" class="runbtn extra" id="noball-${key}">No Ball +1</button>
+      </div>
+      <div class="players">${playersHtml}</div>
+      <div class="team-head">
+        <input type="text" value="${escapeHtml(bowlingTeam.name)} Bowling" disabled />
+      </div>
+      <div class="add-player">
+        <select id="bowlerselect-${bowlingTeamKey}">${playerOptionsHtml(bowlingTeam, bowlingTeam.activeBowlerId, 'Bowler select karein')}</select>
+      </div>
+      <div class="players">
+        <div class="empty">
+          Current bowler: ${bowler ? `${escapeHtml(bowler.name)} - ${bowler.runs || 0}/${bowler.wickets || 0} (${oversDisplay(bowler.balls || 0)}o)` : 'Dropdown se bowler select karein'}
+        </div>
+      </div>
+      ${inningsActionHtml}
+    </div>
+  `;
+}
+
+function playerOptionsHtml(team, selectedId, placeholder){
+  const options = [`<option value="">${placeholder}</option>`];
+  team.players.forEach(player=>{
+    options.push(`<option value="${player.id}"${selectedId === player.id ? ' selected' : ''}>${escapeHtml(player.name)}</option>`);
+  });
+  return options.join('');
 }
 
 function escapeHtml(str){
