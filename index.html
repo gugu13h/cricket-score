@@ -443,15 +443,27 @@
 // without a bundler.
 // Firebase config: paste your Firebase Web app config values here.
 // Find it in Firebase Console > Project settings > General > Your apps > Web app.
- const firebaseConfig = {
+ // Import the functions you need from the SDKs you need
+import { initializeApp } from "firebase/app";
+import { getAnalytics } from "firebase/analytics";
+// TODO: Add SDKs for Firebase products that you want to use
+// https://firebase.google.com/docs/web/setup#available-libraries
+
+// Your web app's Firebase configuration
+// For Firebase JS SDK v7.20.0 and later, measurementId is optional
+const firebaseConfig = {
   apiKey: "AIzaSyDQReO2ZfJ8MVqIdM2nHC2R622OZ3YHVjE",
   authDomain: "cricket-score-a1422.firebaseapp.com",
   projectId: "cricket-score-a1422",
   storageBucket: "cricket-score-a1422.firebasestorage.app",
   messagingSenderId: "1029693418477",
-  appId: "1:1029693418477:web:92971ba875585b2a3f15e4",
-  measurementId: "G-TQPXE34ZY7"
+  appId: "1:1029693418477:web:259937802f04ca2d3f15e4",
+  measurementId: "G-Q72MQGRXJ8"
 };
+
+// Initialize Firebase
+const app = initializeApp(firebaseConfig);
+const analytics = getAnalytics(app);
 
 const FIRESTORE_COLLECTION = 'matches';
 const FIRESTORE_DOCUMENT_ID = 'main-scoreboard';
