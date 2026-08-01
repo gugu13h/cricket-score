@@ -442,15 +442,20 @@
 
 // Firebase config: paste your Firebase Web app config values here.
 // Find it in Firebase Console > Project settings > General > Your apps > Web app.
-const firebaseConfig = {
+import { initializeApp } from "https://www.gstatic.com/firebasejs/12.1.0/firebase-app.js";
+import { getFirestore } from "https://www.gstatic.com/firebasejs/12.1.0/firebase-firestore.js";
+ const firebaseConfig = {
   apiKey: "AIzaSyDQReO2ZfJ8MVqIdM2nHC2R622OZ3YHVjE",
   authDomain: "cricket-score-a1422.firebaseapp.com",
   projectId: "cricket-score-a1422",
   storageBucket: "cricket-score-a1422.firebasestorage.app",
   messagingSenderId: "1029693418477",
-  appId: "1:1029693418477:web:800ea3e8ccfaf4d73f15e4",
-  measurementId: "G-51HSR0BFDS"
+  appId: "1:1029693418477:web:92971ba875585b2a3f15e4",
+  measurementId: "G-TQPXE34ZY7"
 };
+// Initialize Firebase
+const app = initializeApp(firebaseConfig);
+const analytics = getAnalytics(app);
 
 const FIRESTORE_COLLECTION = 'matches';
 const FIRESTORE_DOCUMENT_ID = 'main-scoreboard';
