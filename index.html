@@ -481,6 +481,8 @@
     border-bottom: 1px solid rgba(255,255,255,0.05);
     padding: 10px 4px;
   }
+  .history-match.clickable{cursor:pointer;}
+  .history-match.clickable:hover{background: rgba(245,158,11,0.08);}
   .history-match:last-child{border-bottom:none;}
   .history-title{font-size:15px; font-weight:500;}
   .history-score{
@@ -632,6 +634,7 @@ let unsubscribeScore = null;
 let storageWorks = false; // only true once we've confirmed Firestore reads/writes actually succeed
 let overPopup = null;
 let noBallPopup = null;
+let selectedCompletedMatchId = null;
 
 function defaultState(){
   return {
@@ -1270,12 +1273,37 @@ function completedMatchesHtml(){
       <h2>Completed matches</h2>
       <div class="history-list">
         ${matches.map(match=>`
-          <div class="history-match">
+          <div class="history-match clickable" data-match-id="${match.id}">
             <div class="history-title">${escapeHtml(match.teamA.name)} vs ${escapeHtml(match.teamB.name)}</div>
             <div class="history-score">${escapeHtml(match.result || 'Match completed')}</div>
             <div class="history-meta">${dateText(match.completedAt)}</div>
           </div>
         `).join('')}
+      </div>
+    </div>
+  `;
+}
+
+function bindCompletedMatchDetails(){
+  document.querySelectorAll('.history-match.clickable').forEach(card=>{
+    card.onclick = () => {
+      selectedCompletedMatchId = card.dataset.matchId;
+      render();
+    };
+  });
+  const closeBtn = document.getElementById('closeCompletedMatchBtn');
+  if(closeBtn) closeBtn.onclick = () => { selectedCompletedMatchId = null; render(); };
+}
+
+function completedMatchModalHtml(){
+  if(!selectedCompletedMatchId) return '';
+  const match = (state.completedMatches || []).find(m=>m.id === selectedCompletedMatchId);
+  if(!match) return '';
+  return `
+    <div class="modal-backdrop" role="dialog" aria-modal="true">
+      <div class="modal">
+        ${completedMatchScorecardHtml(match)}
+        <button type="button" class="btn btn-block" id="closeCompletedMatchBtn">Close</button>
       </div>
     </div>
   `;
@@ -1430,6 +1458,7 @@ function render(){
       if(e.key === 'Enter') doLogin();
     });
     bindPublicDetails();
+    bindCompletedMatchDetails();
     return;
   }
 
@@ -1460,6 +1489,7 @@ function render(){
 
     ${overPopupHtml()}
     ${noBallPopupHtml()}
+    ${completedMatchModalHtml()}
   `;
 
   document.getElementById('logoutBtn').onclick = ()=>{
@@ -1587,6 +1617,7 @@ function render(){
   bindOverPopup();
   bindNoBallPopup();
   bindSetupControls();
+  bindCompletedMatchDetails();
 }
 
 function bindSetupControls(){
