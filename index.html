@@ -511,6 +511,31 @@
     text-align:center; color: var(--text-dim); font-size:12px; margin-top: 26px;
     font-family:'Share Tech Mono', monospace;
   }
+  .modal-backdrop{
+    position: fixed;
+    inset: 0;
+    z-index: 50;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    padding: 18px;
+    background: rgba(15,23,42,0.48);
+  }
+  .modal{
+    width: min(420px, 100%);
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 18px;
+    box-shadow: 0 20px 48px rgba(0,0,0,0.28);
+  }
+  .modal h2{margin:0 0 8px; font-size:22px;}
+  .modal .big-stat{
+    font-family:'Share Tech Mono', monospace;
+    font-size: 28px;
+    color: var(--amber);
+    margin: 8px 0 16px;
+  }
 </style>
 </head>
 <body>
@@ -548,6 +573,8 @@ let db = null;
 let firebaseApi = null;
 let unsubscribeScore = null;
 let storageWorks = false; // only true once we've confirmed Firestore reads/writes actually succeed
+let overPopup = null;
+let noBallPopup = null;
 
 function defaultState(){
   return {
@@ -848,10 +875,10 @@ function creditBowler(bowlingTeamKey, runs, legalBall, wicket){
   bowler.wickets = (bowler.wickets || 0) + (wicket ? 1 : 0);
 }
 
-function addBallEvent(teamKey, label, type){
+function addBallEvent(teamKey, label, type, runs, legalBall){
   const team = state[teamKey];
   team.ballLog = team.ballLog || [];
-  team.ballLog.push({ id: uid(), label, type });
+  team.ballLog.push({ id: uid(), label, type, runs: Number(runs || 0), legalBall: Boolean(legalBall) });
   if(team.ballLog.length > 36){
     team.ballLog = team.ballLog.slice(-36);
   }
@@ -860,9 +887,85 @@ function addBallEvent(teamKey, label, type){
 async function addExtra(teamKey, label){
   state[teamKey].extras = (state[teamKey].extras || 0) + 1;
   creditBowler(opponentKey(teamKey), 1, false, false);
-  addBallEvent(teamKey, label, 'extra');
+  addBallEvent(teamKey, label, 'extra', 1, false);
   await saveState();
   render();
+}
+
+async function addNoBall(teamKey){
+  state[teamKey].extras = (state[teamKey].extras || 0) + 1;
+  creditBowler(opponentKey(teamKey), 1, false, false);
+  addBallEvent(teamKey, 'Nb', 'extra', 1, false);
+  noBallPopup = {
+    battingTeamKey: teamKey,
+    bowlingTeamKey: opponentKey(teamKey),
+    batterId: (state[teamKey].activeBatterIds || [])[0] || ''
+  };
+  await saveState();
+  render();
+}
+
+async function addNoBallBatRuns(runs){
+  if(!noBallPopup) return;
+  const team = state[noBallPopup.battingTeamKey];
+  const batterSelect = document.getElementById('noBallBatterSelect');
+  const batterId = batterSelect ? batterSelect.value : noBallPopup.batterId;
+  const batter = team.players.find(p=>p.id === batterId);
+  if(batter && runs > 0){
+    batter.runs += runs;
+    batter.runCounts = batter.runCounts || { 0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 6: 0 };
+    batter.runCounts[runs] = (batter.runCounts[runs] || 0) + 1;
+    creditBowler(noBallPopup.bowlingTeamKey, runs, false, false);
+    updateLastNoBallEvent(team, runs);
+  }
+  noBallPopup = null;
+  await saveState();
+  render();
+}
+
+function updateLastNoBallEvent(team, batRuns){
+  const log = team.ballLog || [];
+  for(let i = log.length - 1; i >= 0; i--){
+    if(log[i].label === 'Nb'){
+      log[i].label = batRuns ? `Nb+${batRuns}` : 'Nb';
+      log[i].runs = Number(log[i].runs || 1) + batRuns;
+      if(batRuns === 4 || batRuns === 6) log[i].type = 'boundary';
+      return;
+    }
+  }
+}
+
+function maybeShowOverPopup(teamKey){
+  const totals = teamTotals(state[teamKey]);
+  if(totals.balls > 0 && totals.balls % 6 === 0){
+    overPopup = {
+      battingTeamKey: teamKey,
+      bowlingTeamKey: opponentKey(teamKey),
+      overNumber: totals.balls / 6,
+      runs: lastCompletedOverRuns(state[teamKey])
+    };
+  }
+}
+
+function lastCompletedOverRuns(team){
+  let legalBalls = 0;
+  let runs = 0;
+  for(let i = (team.ballLog || []).length - 1; i >= 0; i--){
+    const ball = team.ballLog[i];
+    runs += Number(ball.runs || fallbackBallRuns(ball));
+    if(ball.legalBall !== false){
+      legalBalls += 1;
+    }
+    if(legalBalls === 6) break;
+  }
+  return runs;
+}
+
+function fallbackBallRuns(ball){
+  const label = String((ball && ball.label) || '');
+  if(label === 'Wd' || label === 'Nb') return 1;
+  const runs = Number(label);
+  return Number.isFinite(runs) ? runs : 0;
 }
 
 function scoreboardSummaryHtml(activeTeamKey){
@@ -1198,6 +1301,9 @@ function render(){
     ${completedMatchesHtml()}
 
     <div class="footer-note">Completed match ka record 2 weeks tak database mein rahega.</div>
+
+    ${overPopupHtml()}
+    ${noBallPopupHtml()}
   `;
 
   document.getElementById('logoutBtn').onclick = ()=>{
@@ -1246,7 +1352,8 @@ function render(){
             p.runCounts = p.runCounts || { 0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 6: 0 };
             p.runCounts[n] = (p.runCounts[n] || 0) + 1;
             creditBowler(opponentKey(key), n, true, false);
-            addBallEvent(key, String(n), n === 4 || n === 6 ? 'boundary' : '');
+            addBallEvent(key, String(n), n === 4 || n === 6 ? 'boundary' : '', n, true);
+            maybeShowOverPopup(key);
             await saveState();
             render();
           };
@@ -1261,7 +1368,8 @@ function render(){
             p.out = true;
             p.balls += 1;
             creditBowler(opponentKey(key), 0, true, true);
-            addBallEvent(key, 'W', 'wicket');
+            addBallEvent(key, 'W', 'wicket', 0, true);
+            maybeShowOverPopup(key);
           }else{
             p.out = false;
           }
@@ -1285,7 +1393,7 @@ function render(){
     }
     const noBallBtn = document.getElementById('noball-'+key);
     if(noBallBtn){
-      noBallBtn.onclick = ()=>addExtra(key, 'Nb');
+      noBallBtn.onclick = ()=>addNoBall(key);
     }
 
     [0,1].forEach(idx=>{
@@ -1320,6 +1428,8 @@ function render(){
   if(completeMatchBtn){
     completeMatchBtn.onclick = completeMatch;
   }
+  bindOverPopup();
+  bindNoBallPopup();
   bindSetupControls();
 }
 
@@ -1627,6 +1737,71 @@ function scoringPanel(key){
       ${inningsActionHtml}
     </div>
   `;
+}
+
+function overPopupHtml(){
+  if(!overPopup) return '';
+  const bowlingTeam = state[overPopup.bowlingTeamKey];
+  return `
+    <div class="modal-backdrop" role="dialog" aria-modal="true">
+      <div class="modal">
+        <h2>Over ${overPopup.overNumber} complete</h2>
+        <div class="big-stat">${overPopup.runs} runs</div>
+        <div class="field">
+          <label for="overBowlerSelect">Next bowler</label>
+          <select id="overBowlerSelect">
+            ${playerOptionsHtml(bowlingTeam, bowlingTeam.activeBowlerId, 'Bowler select karein')}
+          </select>
+        </div>
+        <button type="button" class="btn btn-block" id="overContinueBtn">Continue</button>
+      </div>
+    </div>
+  `;
+}
+
+function bindOverPopup(){
+  if(!overPopup) return;
+  const select = document.getElementById('overBowlerSelect');
+  const button = document.getElementById('overContinueBtn');
+  if(!button) return;
+  button.onclick = async ()=>{
+    if(select && select.value){
+      state[overPopup.bowlingTeamKey].activeBowlerId = select.value;
+      await saveState();
+    }
+    overPopup = null;
+    render();
+  };
+}
+
+function noBallPopupHtml(){
+  if(!noBallPopup) return '';
+  const battingTeam = state[noBallPopup.battingTeamKey];
+  return `
+    <div class="modal-backdrop" role="dialog" aria-modal="true">
+      <div class="modal">
+        <h2>No Ball runs</h2>
+        <div class="detail-box">No Ball ka 1 run team extras me add ho gaya. Bat run batsman ko milega.</div>
+        <div class="field">
+          <label for="noBallBatterSelect">Batsman</label>
+          <select id="noBallBatterSelect">
+            ${playerOptionsHtml(battingTeam, noBallPopup.batterId, 'Batsman select karein')}
+          </select>
+        </div>
+        <div class="runbtns">
+          ${[1,2,3,4,6].map(run=>`<button type="button" class="runbtn${run === 6 ? ' six' : ''}" data-no-ball-run="${run}">${run}</button>`).join('')}
+          <button type="button" class="runbtn extra" data-no-ball-run="0">No bat run</button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function bindNoBallPopup(){
+  if(!noBallPopup) return;
+  document.querySelectorAll('[data-no-ball-run]').forEach(btn=>{
+    btn.onclick = ()=>addNoBallBatRuns(Number(btn.dataset.noBallRun || 0));
+  });
 }
 
 function playerOptionsHtml(team, selectedId, placeholder){
