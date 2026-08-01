@@ -582,6 +582,7 @@ async function getDb(){
   try{
     const app = api.initializeApp(firebaseConfig);
     db = api.getFirestore(app);
+    console.log('Firebase init succeeded for project:', firebaseConfig.projectId);
     return db;
   }catch(e){
     console.error('Firebase init failed', e);
@@ -593,18 +594,24 @@ async function getDb(){
 // any failure, so callers never accidentally wipe local unsaved data.
 async function loadState(){
   const firestore = await getDb();
-  if(!firestore) return null;
+  if(!firestore) {
+    console.warn('Firestore is unavailable during loadState.');
+    return null;
+  }
   const api = await loadFirebaseApi();
   try{
     const snap = await api.getDoc(api.doc(firestore, FIRESTORE_COLLECTION, FIRESTORE_DOCUMENT_ID));
     if(snap.exists()){
       const data = snap.data();
       storageWorks = true;
+      console.log('Firestore state loaded successfully.');
       return normalizeState(data.state);
     }
     storageWorks = true;
+    console.log('Firestore document not found; using default state.');
     return defaultState();
   }catch(e){
+    console.error('Firestore load failed', e);
     return null;
   }
 }
