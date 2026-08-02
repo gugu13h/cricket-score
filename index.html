@@ -20,6 +20,19 @@
     --green-glow: #4ade80;
     --highlight: #7dd3fc;
   }
+  .theme-light{
+    --bg: #eff6ff;
+    --panel: rgba(255,255,255,0.92);
+    --panel-2: rgba(241,245,249,0.96);
+    --line: rgba(148,163,184,0.24);
+    --amber: #c47412;
+    --amber-dim: #9a580f;
+    --red: #b91c1c;
+    --text: #0f172a;
+    --text-dim: #475569;
+    --green-glow: #15803d;
+    --highlight: #0369a1;
+  }
   *{box-sizing:border-box;}
   body{
     margin:0;
@@ -31,6 +44,12 @@
     font-family: 'Oswald', sans-serif;
     min-height:100vh;
     padding: 24px 16px 60px;
+  }
+  .theme-light body{
+    background: radial-gradient(circle at top left, rgba(244,246,255,0.8), transparent 18%),
+                radial-gradient(circle at top right, rgba(165,180,252,0.65), transparent 14%),
+                linear-gradient(180deg, #f8fafc 0%, #e2e8f0 45%, #cbd5e1 100%);
+    color: var(--text);
   }
   body::before{
     content: '';
@@ -257,6 +276,16 @@
     border-radius: 14px;
     padding: 12px 16px;
     box-shadow: 0 18px 38px rgba(0,0,0,0.12);
+  }
+  .topbar-actions{
+    display:flex;
+    gap: 10px;
+    align-items:center;
+  }
+  .theme-row{
+    margin-bottom: 16px;
+    display:flex;
+    justify-content:flex-end;
   }
   .topbar span.name{color: var(--amber);}
 
@@ -685,6 +714,18 @@ const COMPLETED_MATCH_RETENTION_MS = 14 * 24 * 60 * 60 * 1000;
 const DELETE_HISTORY_PASSWORD = 'nahibatayege';
 const FIREBASE_SDK_VERSION = '12.1.0';
 let currentUser = null;
+let currentTheme = window.localStorage.getItem('theme') || 'dark';
+
+function applyTheme(){
+  document.documentElement.classList.toggle('theme-light', currentTheme === 'light');
+}
+
+function toggleTheme(){
+  currentTheme = currentTheme === 'dark' ? 'light' : 'dark';
+  window.localStorage.setItem('theme', currentTheme);
+  applyTheme();
+}
+
 let state = null;
 let db = null;
 let firebaseApi = null;
@@ -1402,7 +1443,7 @@ function bindCompletedMatchDetails(){
     };
   });
   document.querySelectorAll('.history-delete-btn').forEach(btn=>{
-    btn.onclick = async event => {
+    btn.addEventListener('click', async event => {
       event.stopPropagation();
       const password = window.prompt('Match history delete karne ke liye password daalein:');
       if(password !== DELETE_HISTORY_PASSWORD){
@@ -1416,10 +1457,25 @@ function bindCompletedMatchDetails(){
       }
       await saveState();
       render();
-    };
+    });
   });
   const closeBtn = document.getElementById('closeCompletedMatchBtn');
-  if(closeBtn) closeBtn.onclick = () => { selectedCompletedMatchId = null; render(); };
+  if(closeBtn){
+    closeBtn.addEventListener('click', ()=>{
+      selectedCompletedMatchId = null;
+      render();
+    });
+  }
+
+  const backdrop = document.querySelector('.modal-backdrop[role="dialog"]');
+  if(backdrop){
+    backdrop.addEventListener('click', e => {
+      if(e.target === backdrop){
+        selectedCompletedMatchId = null;
+        render();
+      }
+    });
+  }
 }
 
 function completedMatchModalHtml(){
@@ -1470,6 +1526,9 @@ function livePageHtml(activeTeamKey){
     <div class="masthead">
       <div class="eyebrow">Live match</div>
       <h1>Cricket Scoreboard</h1>
+    </div>
+    <div class="theme-row">
+      <button class="btn btn-ghost btn-small" id="themeToggleBtn">${currentTheme === 'dark' ? 'Day Mode' : 'Night Mode'}</button>
     </div>
 
     ${scoreboardSummaryHtml(activeTeamKey)}
@@ -1577,14 +1636,11 @@ function render(){
   const app = document.getElementById('app');
   state = normalizeState(state || defaultState());
   const activeTeamKey = state.firstInningsComplete ? 'teamB' : 'teamA';
-  const battingTeam = state[activeTeamKey];
-  const bowlingTeamKey = opponentKey(activeTeamKey);
-  const bowlingTeam = state[bowlingTeamKey];
 
-  if(!overPopup && bowlingTeam.players.length > 0 && !bowlingTeam.activeBowlerId && (teamTotals(battingTeam).balls === 0)){
+  if(!overPopup && state[activeTeamKey].players.length > 0 && !state[opponentKey(activeTeamKey)].activeBowlerId && teamTotals(state[activeTeamKey]).balls === 0){
     overPopup = {
       battingTeamKey: activeTeamKey,
-      bowlingTeamKey,
+      bowlingTeamKey: opponentKey(activeTeamKey),
       overNumber: 1,
       runs: 0
     };
@@ -1596,8 +1652,13 @@ function render(){
     document.getElementById('loginName').addEventListener('keydown', e=>{
       if(e.key === 'Enter') doLogin();
     });
-    bindPublicDetails();
-    bindCompletedMatchDetails();
+    const themeToggleBtn = document.getElementById('themeToggleBtn');
+    if(themeToggleBtn){
+      themeToggleBtn.onclick = ()=>{
+        toggleTheme();
+        render();
+      };
+    }
     return;
   }
 
@@ -1609,7 +1670,10 @@ function render(){
 
     <div class="topbar">
       <span>Scoring by <span class="name">${escapeHtml(currentUser)}</span></span>
-      <button class="btn btn-ghost btn-small" id="logoutBtn">Logout</button>
+      <div class="topbar-actions">
+        <button class="btn btn-ghost btn-small" id="themeToggleBtn">${currentTheme === 'dark' ? 'Day Mode' : 'Night Mode'}</button>
+        <button class="btn btn-ghost btn-small" id="logoutBtn">Logout</button>
+      </div>
     </div>
 
     ${setupPanel()}
@@ -1639,19 +1703,28 @@ function render(){
     }
     render();
   };
+  const themeToggleBtn = document.getElementById('themeToggleBtn');
+  if(themeToggleBtn){
+    themeToggleBtn.onclick = ()=>{
+      toggleTheme();
+      render();
+    };
+  }
 
   [activeTeamKey].forEach(key=>{
     const nameInput = document.getElementById('name-'+key);
-    nameInput.addEventListener('change', async ()=>{
-      state[key].name = nameInput.value.trim() || (key==='teamA' ? 'Team A':'Team B');
-      await saveState();
-      render();
-    });
+    if(nameInput){
+      nameInput.addEventListener('change', async ()=>{
+        state[key].name = nameInput.value.trim() || (key==='teamA' ? 'Team A':'Team B');
+        await saveState();
+        render();
+      });
+    }
 
     const addBtn = document.getElementById('addbtn-'+key);
     const addInput = document.getElementById('addinput-'+key);
     const addPlayerNow = async ()=>{
-      const name = addInput.value.trim();
+      const name = addInput ? addInput.value.trim() : '';
       if(!name) return;
       state[key].players.push(defaultPlayer(name));
       await saveState();
@@ -1693,7 +1766,7 @@ function render(){
             p.out = true;
             p.balls += 1;
             creditBowler(opponentKey(key), 0, true, true);
-            addBallEvent(key, 'W', 'wicket', 0, true);
+            addBallEvent(key, 'W', 'wicket', 0, true, p.id, state[opponentKey(key)].activeBowlerId, true);
             maybeShowOverPopup(key);
           }else{
             p.out = false;
@@ -2089,7 +2162,10 @@ function overPopupHtml(){
             ${playerOptionsHtml(bowlingTeam, bowlingTeam.activeBowlerId, 'Bowler select karein')}
           </select>
         </div>
-        <button type="button" class="btn btn-block" id="overContinueBtn">Continue</button>
+        <div class="runbtns" style="justify-content:space-between; gap:10px; margin-top:10px;">
+          <button type="button" class="btn btn-ghost btn-small" id="overClearBtn">close</button>
+          <button type="button" class="btn btn-block" id="overContinueBtn">Continue</button>
+        </div>
       </div>
     </div>
   `;
@@ -2098,16 +2174,26 @@ function overPopupHtml(){
 function bindOverPopup(){
   if(!overPopup) return;
   const select = document.getElementById('overBowlerSelect');
-  const button = document.getElementById('overContinueBtn');
-  if(!button) return;
-  button.onclick = async ()=>{
-    if(select && select.value){
-      state[overPopup.bowlingTeamKey].activeBowlerId = select.value;
+  const continueBtn = document.getElementById('overContinueBtn');
+  const clearBtn = document.getElementById('overClearBtn');
+  if(continueBtn){
+    continueBtn.onclick = async ()=>{
+      if(select){
+        state[overPopup.bowlingTeamKey].activeBowlerId = select.value || null;
+        await saveState();
+      }
+      overPopup = null;
+      render();
+    };
+  }
+  if(clearBtn){
+    clearBtn.onclick = async ()=>{
+      state[overPopup.bowlingTeamKey].activeBowlerId = null;
       await saveState();
-    }
-    overPopup = null;
-    render();
-  };
+      overPopup = null;
+      render();
+    };
+  }
 }
 
 function noBallPopupHtml(){
@@ -2170,6 +2256,7 @@ async function doLogin(){
 }
 
 async function init(){
+  applyTheme();
   state = defaultState();
   render();
   const loaded = await loadState();
