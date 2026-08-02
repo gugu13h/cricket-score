@@ -180,7 +180,7 @@
   }
   @media (max-width: 720px){ .detail-grid{grid-template-columns: 1fr 1fr;} }
   .detail-item{
-    background: rgba(5, 31, 58, 0.92);
+    background: rgba(106, 159, 214, 0.92);
     border: 1px solid rgba(255,255,255,0.1);
     border-radius: 12px;
     padding: 14px;
@@ -475,6 +475,8 @@
   .runbtn.six{color: var(--green-glow); border-color: rgba(74,222,128,0.35);}
   .runbtn.six:hover{border-color: rgba(74,222,128,0.6);}
   .runbtn.extra{width:auto; padding: 0 10px; color: var(--amber); border-color: rgba(240,180,41,0.35);}
+  .runbtn.undo{width:auto; padding: 0 10px; color:#fff; border-color: rgba(239,68,68,0.35); background: rgba(239,68,68,0.12);}
+  .runbtn.undo:hover{border-color: rgba(239,68,68,0.6); background: rgba(239,68,68,0.2);}
   .runbtn.active{background: var(--amber); color:#241a03; border-color: var(--amber);}
   .iconbtn{
     background: transparent;
@@ -529,6 +531,21 @@
     color: var(--amber);
     font-family:'Share Tech Mono', monospace;
     white-space: nowrap;
+  }
+  .history-delete-btn{
+    margin-left: 10px;
+    border: 1px solid rgba(239,68,68,0.35);
+    background: rgba(239,68,68,0.08);
+    color: #f8fafc;
+    padding: 4px 8px;
+    border-radius: 10px;
+    cursor: pointer;
+    font-family:'Share Tech Mono', monospace;
+    font-size: 11px;
+  }
+  .history-delete-btn:hover{
+    border-color: rgba(239,68,68,0.6);
+    background: rgba(239,68,68,0.16);
   }
   .history-meta{
     grid-column: 1 / -1;
@@ -665,6 +682,7 @@ const firebaseConfig = {
 const FIRESTORE_COLLECTION = 'matches';
 const FIRESTORE_DOCUMENT_ID = 'main-scoreboard';
 const COMPLETED_MATCH_RETENTION_MS = 14 * 24 * 60 * 60 * 1000;
+const DELETE_HISTORY_PASSWORD = 'nahibatayege';
 const FIREBASE_SDK_VERSION = '12.1.0';
 let currentUser = null;
 let state = null;
@@ -777,10 +795,7 @@ function syncBowlerNames(team){
 }
 
 function pruneCompletedMatches(matches){
-  const cutoff = Date.now() - COMPLETED_MATCH_RETENTION_MS;
-  return (Array.isArray(matches) ? matches : [])
-    .filter(match=>Number(match.completedAt || 0) >= cutoff)
-    .sort((a,b)=>Number(b.completedAt || 0) - Number(a.completedAt || 0));
+  return (Array.isArray(matches) ? matches : []).slice().sort((a,b)=>Number(b.completedAt || 0) - Number(a.completedAt || 0));
 }
 
 function uid(){
@@ -1368,7 +1383,10 @@ function completedMatchesHtml(){
           <div class="history-match clickable" data-match-id="${match.id}">
             <div class="history-title">${escapeHtml(match.teamA.name)} vs ${escapeHtml(match.teamB.name)}</div>
             <div class="history-score">${escapeHtml(match.result || 'Match completed')}</div>
-            <div class="history-meta">${dateText(match.completedAt)}</div>
+            <div class="history-meta">
+              ${dateText(match.completedAt)}
+              <button type="button" class="history-delete-btn" data-match-id="${match.id}" title="Delete match history">🗑 Delete</button>
+            </div>
           </div>
         `).join('')}
       </div>
@@ -1380,6 +1398,23 @@ function bindCompletedMatchDetails(){
   document.querySelectorAll('.history-match.clickable').forEach(card=>{
     card.onclick = () => {
       selectedCompletedMatchId = card.dataset.matchId;
+      render();
+    };
+  });
+  document.querySelectorAll('.history-delete-btn').forEach(btn=>{
+    btn.onclick = async event => {
+      event.stopPropagation();
+      const password = window.prompt('Match history delete karne ke liye password daalein:');
+      if(password !== DELETE_HISTORY_PASSWORD){
+        window.alert('Password galat hai. Delete nahi kiya gaya.');
+        return;
+      }
+      const matchId = btn.dataset.matchId;
+      state.completedMatches = (state.completedMatches || []).filter(m=>m.id !== matchId);
+      if(selectedCompletedMatchId === matchId){
+        selectedCompletedMatchId = null;
+      }
+      await saveState();
       render();
     };
   });
@@ -1589,7 +1624,7 @@ function render(){
 
     ${completedMatchesHtml()}
 
-    <div class="footer-note">Completed match ka record 2 weeks tak database mein rahega.</div>
+    <div class="footer-note">Completed match history user manually delete kar sakta hai.</div>
 
     ${overPopupHtml()}
     ${noBallPopupHtml()}
@@ -1684,6 +1719,14 @@ function render(){
     const noBallBtn = document.getElementById('noball-'+key);
     if(noBallBtn){
       noBallBtn.onclick = ()=>addNoBall(key);
+    }
+    const undoBtn = document.getElementById('undo-'+key);
+    if(undoBtn){
+      undoBtn.onclick = async ()=>{
+        undoLastBall();
+        await saveState();
+        render();
+      };
     }
 
     [0,1].forEach(idx=>{
@@ -1956,6 +1999,7 @@ function teamPanel(key){
       <div class="add-player">
         <button type="button" class="runbtn extra" id="wide-${key}">Wide +1</button>
         <button type="button" class="runbtn extra" id="noball-${key}">No Ball +1</button>
+        <button type="button" class="runbtn undo" id="undo-${key}">Undo</button>
       </div>
       <div class="players">${playersHtml}</div>
       <div class="team-head">
@@ -2012,6 +2056,7 @@ function scoringPanel(key){
       <div class="add-player">
         <button type="button" class="runbtn extra" id="wide-${key}">Wide +1</button>
         <button type="button" class="runbtn extra" id="noball-${key}">No Ball +1</button>
+        <button type="button" class="runbtn undo" id="undo-${key}">Undo</button>
       </div>
       <div class="players">${playersHtml}</div>
       <div class="team-head">
