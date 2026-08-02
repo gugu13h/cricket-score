@@ -732,6 +732,7 @@ let firebaseApi = null;
 let unsubscribeScore = null;
 let storageWorks = false; // only true once we've confirmed Firestore reads/writes actually succeed
 let overPopup = null;
+let suppressOverPopup = false;
 let noBallPopup = null;
 let selectedCompletedMatchId = null;
 
@@ -1637,7 +1638,7 @@ function render(){
   state = normalizeState(state || defaultState());
   const activeTeamKey = state.firstInningsComplete ? 'teamB' : 'teamA';
 
-  if(!overPopup && state[activeTeamKey].players.length > 0 && !state[opponentKey(activeTeamKey)].activeBowlerId && teamTotals(state[activeTeamKey]).balls === 0){
+  if(!overPopup && !suppressOverPopup && state[activeTeamKey].players.length > 0 && !state[opponentKey(activeTeamKey)].activeBowlerId && teamTotals(state[activeTeamKey]).balls === 0){
     overPopup = {
       battingTeamKey: activeTeamKey,
       bowlingTeamKey: opponentKey(activeTeamKey),
@@ -2189,6 +2190,7 @@ function bindOverPopup(){
   if(clearBtn){
     clearBtn.onclick = async ()=>{
       state[overPopup.bowlingTeamKey].activeBowlerId = null;
+      suppressOverPopup = true;
       await saveState();
       overPopup = null;
       render();
