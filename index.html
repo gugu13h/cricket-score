@@ -21,15 +21,15 @@
     --highlight: #7dd3fc;
   }
   .theme-light{
-    --bg: #eff6ff;
-    --panel: rgba(255,255,255,0.92);
-    --panel-2: rgba(241,245,249,0.96);
-    --line: rgba(148,163,184,0.24);
+    --bg: #ffffff;
+    --panel: #ffffff;
+    --panel-2: #ffffff;
+    --line: rgba(0,0,0,0.08);
     --amber: #c47412;
     --amber-dim: #9a580f;
     --red: #b91c1c;
-    --text: #0f172a;
-    --text-dim: #475569;
+    --text: #0b0b0b;
+    --text-dim: #3f4857;
     --green-glow: #15803d;
     --highlight: #0369a1;
   }
@@ -366,8 +366,15 @@
     font-family:'Share Tech Mono', monospace;
     font-size: 13px;
     margin-top: 10px;
+    padding: 10px 14px;
+    border-radius: 12px;
+    background: rgba(255,255,255,0.08);
   }
   .current-bowler strong{color: var(--amber);}
+  .theme-light .current-bowler{
+    background: #ffffff;
+    color: #0b0b0b;
+  }
 
   .ball-log{
     grid-column: 1 / -1;
@@ -661,18 +668,34 @@
     inset: 0;
     z-index: 50;
     display:flex;
-    align-items:center;
+    align-items:flex-start;
     justify-content:center;
-    padding: 18px;
+    padding: 24px 16px 16px;
     background: rgba(15,23,42,0.48);
+    overflow-y: auto;
   }
   .modal{
-    width: min(420px, 100%);
+    position: relative;
+    width: min(840px, 100%);
+    max-height: calc(100vh - 120px);
     background: var(--panel);
     border: 1px solid var(--line);
-    border-radius: 6px;
+    border-radius: 10px;
     padding: 18px;
     box-shadow: 0 20px 48px rgba(0,0,0,0.28);
+    overflow: hidden;
+    overflow-y: auto;
+  }
+  .modal-handle{
+    cursor: grab;
+    padding: 10px 0 8px;
+    text-align: center;
+    font-size: 13px;
+    color: var(--text-dim);
+    user-select: none;
+  }
+  .modal-handle:active{
+    cursor: grabbing;
   }
   .modal h2{margin:0 0 8px; font-size:22px;}
   .modal .big-stat{
@@ -1477,6 +1500,8 @@ function bindCompletedMatchDetails(){
       }
     });
   }
+
+  bindCompletedMatchModalDrag();
 }
 
 function completedMatchModalHtml(){
@@ -1486,6 +1511,7 @@ function completedMatchModalHtml(){
   return `
     <div class="modal-backdrop" role="dialog" aria-modal="true">
       <div class="modal">
+        <div class="modal-handle">Drag to move</div>
         ${completedMatchScorecardHtml(match)}
         <button type="button" class="btn btn-block" id="closeCompletedMatchBtn">Close</button>
       </div>
@@ -1579,6 +1605,7 @@ function livePageHtml(activeTeamKey){
     </div>
 
     ${completedMatchesHtml()}
+    ${completedMatchModalHtml()}
 
     <div class="login-card public-login">
       <p>Scorer login</p>
@@ -1633,6 +1660,39 @@ function bindPublicDetails(){
   }
 }
 
+function bindCompletedMatchModalDrag(){
+  const handle = document.querySelector('.modal-handle');
+  if(!handle) return;
+  const modal = handle.closest('.modal');
+  if(!modal) return;
+
+  let startY = 0;
+  let currentY = 0;
+  let dragging = false;
+
+  handle.onpointerdown = e => {
+    e.preventDefault();
+    dragging = true;
+    startY = e.clientY;
+    handle.setPointerCapture(e.pointerId);
+  };
+
+  handle.onpointermove = e => {
+    if(!dragging) return;
+    const delta = e.clientY - startY;
+    modal.style.transform = `translateY(${currentY + delta}px)`;
+  };
+
+  handle.onpointerup = handle.onpointercancel = e => {
+    if(!dragging) return;
+    const delta = e.clientY - startY;
+    currentY += delta;
+    modal.style.transform = `translateY(${currentY}px)`;
+    dragging = false;
+    handle.releasePointerCapture(e.pointerId);
+  };
+}
+
 function render(){
   const app = document.getElementById('app');
   state = normalizeState(state || defaultState());
@@ -1660,6 +1720,8 @@ function render(){
         render();
       };
     }
+    bindCompletedMatchDetails();
+    bindPublicDetails();
     return;
   }
 
